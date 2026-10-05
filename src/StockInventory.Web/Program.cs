@@ -36,6 +36,12 @@ builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);
 builder.Services.AddAuthorization();
+builder.Services.AddRazorPages(o =>
+{
+    o.Conventions.AuthorizeFolder("/");
+    foreach (var page in new[] { "/Account/Login", "/Account/LoginWith2fa", "/Account/LoginWithRecoveryCode", "/Account/Logout" })
+        o.Conventions.AllowAnonymousToPage(page);
+});
 builder.Services.AddAntiforgery(o => { o.HeaderName = "X-CSRF-TOKEN"; o.Cookie.Name = "si.csrf"; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; });
 builder.Services.AddHsts(o => { o.MaxAge = TimeSpan.FromSeconds(15552000); o.IncludeSubDomains = false; o.Preload = false; });
 builder.Services.AddHostedService<AdminSeeder>();
@@ -50,6 +56,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseOnboardingGate();
 
+app.UseStaticFiles();
+app.MapRazorPages();
 app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();
 app.MapGet("/health", HealthEndpoint.HandleAsync).AllowAnonymous();
 

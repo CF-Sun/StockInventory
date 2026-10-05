@@ -1,0 +1,11 @@
+@page
+@model StockInventory.Web.Pages.Account.LoginWithRecoveryCodeModel
+@{ ViewData["Title"] = "還原碼登入"; }
+<h1>還原碼登入</h1>
+<form method="post" class="card">
+  <input type="hidden" asp-for="ReturnUrl" />
+  @if (Model.Error is not null) { <div class="err" role="alert">@Model.Error</div> }
+  <label asp-for="RecoveryCode">還原碼</label>
+  <input asp-for="RecoveryCode" type="text" autocomplete="off" autofocus />
+  <button type="submit">登入</button>
+</form>

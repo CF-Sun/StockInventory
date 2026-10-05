@@ -1,0 +1,30 @@
+@page
+@model StockInventory.Web.Pages.Account.Manage.TwoFactorModel
+@{ ViewData["Title"] = "雙重驗證"; }
+<h1>雙重驗證</h1>
+@if (Model.RecoveryCodes is not null)
+{
+  <div class="card">
+    <p class="ok">雙重驗證已啟用。</p>
+    <p>請妥善保存下列還原碼(每組只能用一次)。<strong>關閉此頁後將無法再次查看。</strong></p>
+    <ol class="codes">@foreach (var c in Model.RecoveryCodes) { <li><code>@c</code></li> }</ol>
+    <a href="/">我已保存,繼續</a>
+  </div>
+}
+else if (Model.Enabled)
+{
+  <p class="card">雙重驗證已啟用。如需重設,請聯絡管理員。</p>
+}
+else
+{
+  <form method="post" class="card">
+    <p>1. 用驗證器 App(如 Google Authenticator)掃描 QR Code,或手動輸入金鑰。</p>
+    <div class="qr">@Html.Raw(Model.QrSvg)</div>
+    <p>金鑰:<code>@Model.SharedKey</code></p>
+    <p>2. 輸入 App 顯示的 6 位數代碼。</p>
+    @if (Model.Error is not null) { <div class="err" role="alert">@Model.Error</div> }
+    <label asp-for="Code">驗證碼</label>
+    <input asp-for="Code" type="text" inputmode="numeric" autocomplete="one-time-code" />
+    <button type="submit">啟用</button>
+  </form>
+}

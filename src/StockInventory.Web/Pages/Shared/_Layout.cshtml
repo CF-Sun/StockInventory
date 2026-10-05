@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>@(ViewData["Title"] ?? "股票庫存") - 股票即時庫存管理平台</title>
+  <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+  @if (User.Identity?.IsAuthenticated == true)
+  {
+    <nav>
+      <span>@User.Identity!.Name</span>
+      <form method="post" asp-page="/Account/Logout"><button type="submit" style="width:auto;margin:0;padding:6px 12px">登出</button></form>
+    </nav>
+  }
+  <main>@RenderBody()</main>
+</body>
+</html>
