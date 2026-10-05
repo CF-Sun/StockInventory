@@ -4,6 +4,7 @@ using StockInventory.Core;
 using StockInventory.Data;
 using StockInventory.Quotes;
 using StockInventory.Web.Options;
+using StockInventory.Quotes;
 
 namespace StockInventory.Web.Services;
 

@@ -4,6 +4,7 @@ using StockInventory.Core;
 using StockInventory.Data;
 using StockInventory.Quotes;
 using StockInventory.Web.Options;
+using StockInventory.Quotes;
 using StockInventory.Web.Security;
 using static StockInventory.Web.Api.ApiResults;
 

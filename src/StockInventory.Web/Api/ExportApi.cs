@@ -1,3 +1,4 @@
+using StockInventory.Quotes;
 using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Options;
