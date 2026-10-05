@@ -55,8 +55,11 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
 
     private MarketStatusSnapshot Snapshot(DateTime nowUtc)
     {
-        // market.stale = (state == Open) && (now - lastSuccessAtUtc) > StaleSeconds;從未成功抓取過時為 false
-        var stale = _state == MarketState.Open && _lastSuccessUtc is { } t && (nowUtc - t).TotalSeconds > _q.StaleSeconds;
+        // market.stale = (state == Open) && (now - lastSuccessAtUtc) > 門檻;從未成功抓取過時為 false。
+        // 門檻:有連線時為 StaleSeconds;無連線時抓取間隔拉長為 IdleIntervalSeconds,所以門檻為 IdleIntervalSeconds + StaleSeconds,
+        // 避免正常的閒置間隔被誤判為報價中斷(SPEC §7.3/§7.4 矛盾的修正,方案 a)。
+        var threshold = _conns.ActiveCount > 0 ? _q.StaleSeconds : _q.IdleIntervalSeconds + _q.StaleSeconds;
+        var stale = _state == MarketState.Open && _lastSuccessUtc is { } t && (nowUtc - t).TotalSeconds > threshold;
         return new MarketStatusSnapshot(_state, stale, _lastSuccessUtc);
     }
 

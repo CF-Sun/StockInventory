@@ -20,17 +20,21 @@
 `tests/StockInventory.Quotes.Tests/Samples/*.json` 是**依 SPEC §7.1 欄位描述手寫的合成樣本**,不是真實回應。
 解析器測試只證明解析邏輯符合 SPEC,不證明與真實 MIS 回應相容。取得真實回應後,請替換或補充這些樣本。
 
-## 規格內部矛盾(依 §0.10 回報,尚未自行選邊)
+## 規格內部矛盾(已解決)
 
-**§7.3 閒置間隔 與 §7.4 `market.stale`:**
-- §7.3:無連線時抓取間隔為 `Quote:IdleIntervalSeconds`(300 秒)。
-- §7.4:`market.stale = Open && (now - lastSuccessAtUtc) > StaleSeconds`(180 秒)。
-- §7.6:`stale` 為真時寄「報價中斷」Email。
+**§7.3 閒置間隔 與 §7.4 `market.stale`**:無連線時抓取間隔為 300 秒,但 `stale` 門檻為 180 秒,
+會在盤中沒人開頁面時誤報「報價中斷」(`/health` 回 503、寄 Email)。
 
-盤中沒有人開啟頁面時,最後成功時間每 300 秒才更新一次,所以約有 120 秒(300 − 180)的時間 `stale` 會是真,
-`/health` 會回 503、並寄出「報價中斷」信,即使抓取完全正常。目前依 SPEC 字面實作,**尚未修正**。
-可能的修正(請你決定):(a) 無連線時 stale 門檻改為 `IdleIntervalSeconds + StaleSeconds`;
-(b) `/health` 與 Email 只在「有連線或最近一次抓取失敗」時才判斷;(c) 把 `IdleIntervalSeconds` 調到 < 180。
+**已採用方案 (a)**:無連線時 `stale` 門檻為 `IdleIntervalSeconds + StaleSeconds`(預設 480 秒),
+有連線時維持 `StaleSeconds`(180 秒)。已實作於 `QuoteFetcher.Snapshot`,測試:
+`Stale_WhenNoConnections_UsesIdlePlusStaleThreshold`、`IdleNormalOperation_NeverFlagsStale`。
+**SPEC.md §7.4 需同步修改**(SPEC.md 不在本 repo,請你更新原檔):
+
+> `market.stale = (state == Open) && (now - lastSuccessAtUtc) > 門檻`,
+> 其中門檻 = 有連線時為 `Quote:StaleSeconds`;無連線時為 `Quote:IdleIntervalSeconds + Quote:StaleSeconds`。
+
+注意:單檔報價的 `quoteStatus = delayed`(§7.4 的另一條規則,以 `FetchedAtUtc` 與 `StaleSeconds` 比較)沒有改動。
+閒置一段時間後有人開頁面,最初幾秒畫面可能顯示「延遲」,抓取(5 秒內)完成後會恢復。
 
 ## 其他假設(SPEC 未寫明)
 

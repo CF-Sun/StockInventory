@@ -212,6 +212,44 @@ public class FetcherTests
         Assert.Contains(e.Sub.Ticks, t => t.S.Stale && t.Changed); // 旗標改變有通知
     }
 
+    [Fact] // 方案 a:無連線時門檻為 Idle(300) + Stale(180) = 480 秒
+    public async Task Stale_WhenNoConnections_UsesIdlePlusStaleThreshold()
+    {
+        var e = new Env();
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        await e.Fetcher.TickAsync(default);                       // t0 成功
+        e.Client.Fail = true;
+
+        e.Clock.Advance(TimeSpan.FromSeconds(200));
+        await e.Fetcher.TickAsync(default);
+        Assert.False(e.Fetcher.Get().Stale);                      // 正常閒置間隔內(舊規則 180 秒會誤判為 stale)
+
+        e.Clock.Advance(TimeSpan.FromSeconds(280));               // 距 t0 = 480 秒
+        Assert.False(e.Fetcher.Get().Stale);                      // 剛好 480 秒不算
+        e.Clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(e.Fetcher.Get().Stale);                       // 481 秒才算
+
+        e.Connections.N = 1;                                      // 有人連線後回到 180 秒門檻
+        Assert.True(e.Fetcher.Get().Stale);
+    }
+
+    [Fact] // 閒置期間正常抓取(每 300 秒一次)不應觸發任何 stale 通知
+    public async Task IdleNormalOperation_NeverFlagsStale()
+    {
+        var e = new Env();
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        for (var i = 0; i < 12; i++)                               // 模擬 1 小時,每 5 秒喚醒一次
+        {
+            for (var k = 0; k < 60; k++) { await e.Fetcher.TickAsync(default); e.Clock.Advance(TimeSpan.FromSeconds(5)); }
+            Assert.False(e.Fetcher.Get().Stale);
+        }
+        Assert.All(e.Sub.Ticks, t => Assert.False(t.S.Stale));
+    }
+
     [Fact]
     public async Task Batches_BySize_And_RateLimited()
     {
