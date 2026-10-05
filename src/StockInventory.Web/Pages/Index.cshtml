@@ -1,4 +1,13 @@
 @page "/"
-@{ ViewData["Title"] = "庫存總覽"; }
-<h1>庫存總覽</h1>
-<p>建置中。</p>
+@{ ViewData["Title"] = "庫存總覽"; ViewData["Wide"] = true; }
+<div id="banner" class="banner" hidden></div>
+<div class="sticky-top">
+  <div id="chips" class="chips" role="group" aria-label="庫存選擇"></div>
+  <div id="summary" class="summary"></div>
+</div>
+<div id="error" class="err" role="alert" hidden>
+  <span>載入失敗,請重試</span> <button id="retry" type="button">重試</button>
+</div>
+<div id="content"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+<p><a id="export" href="/api/export/holdings.csv">匯出 CSV</a></p>
+<script src="~/js/overview.js"></script>

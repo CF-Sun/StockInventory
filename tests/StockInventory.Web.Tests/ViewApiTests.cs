@@ -171,3 +171,22 @@ public class ViewApiTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await LoginFlowTests.NewClient(f).GetAsync("/api/holdings")).StatusCode);
     }
 }
+
+public class OverviewPageTests
+{
+    [Fact]
+    public async Task IndexPage_ServedWithSiteScript_NoExternalOrInlineScript()
+    {
+        using var f = new TestFactory();
+        var (c, _, _) = await A.SignInAsync(f, "alice", "User");
+        var res = await c.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var html = await res.Content.ReadAsStringAsync();
+        Assert.Contains("/js/overview.js", html);
+        Assert.Contains("id=\"chips\"", html);
+        Assert.DoesNotContain("http://", html);
+        Assert.DoesNotContain("https://", html);
+        Assert.DoesNotMatch(@"<script(?![^>]*\bsrc=)", html); // 沒有內嵌腳本(CSP)
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/js/overview.js")).StatusCode);
+    }
+}

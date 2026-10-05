@@ -17,6 +17,6 @@
       <form method="post" asp-page="/Account/Logout"><button type="submit" style="width:auto;margin:0;padding:6px 12px">登出</button></form>
     </nav>
   }
-  <main>@RenderBody()</main>
+  <main class="@(ViewData["Wide"] is true ? "wide" : "")">@RenderBody()</main>
 </body>
 </html>
