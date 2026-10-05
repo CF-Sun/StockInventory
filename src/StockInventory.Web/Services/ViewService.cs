@@ -27,9 +27,18 @@ public sealed class ViewService(AppDbContext db, IQuoteCache quotes, IMarketStat
             .Select(x => int.TryParse(x, out var n) ? n : (int?)null).Where(n => n.HasValue).Select(n => n!.Value).ToArray();
 
     /// <param name="portfolioIds">null = 全部;不屬於自己的 Id 忽略,全部無效視為全部。</param>
-    public async Task<ViewDto> BuildAsync(Guid userId, IReadOnlyCollection<int>? portfolioIds, bool merge, CancellationToken ct = default)
+    public async Task<ViewDto> BuildAsync(Guid userId, IReadOnlyCollection<int>? portfolioIds, bool merge, CancellationToken ct = default) =>
+        ToDto(await BuildContextAsync(userId, portfolioIds, merge, ct));
+
+    /// <summary>未轉成 JSON 的計算結果與脈絡(CSV 匯出需要庫存名稱與是否扣費)。</summary>
+    public sealed record ViewContext(ViewResult Result, MarketStatusSnapshot Market, bool DeductFees, DateTime AsOf,
+        IReadOnlyDictionary<int, string> PortfolioNames);
+
+    public async Task<ViewContext> BuildContextAsync(Guid userId, IReadOnlyCollection<int>? portfolioIds, bool merge, CancellationToken ct = default)
     {
-        var owned = await db.Portfolios.AsNoTracking().Where(p => p.UserId == userId).Select(p => p.PortfolioId).ToListAsync(ct);
+        var ownedRows = await db.Portfolios.AsNoTracking().Where(p => p.UserId == userId)
+            .Select(p => new { p.PortfolioId, p.Name }).ToListAsync(ct);
+        var owned = ownedRows.Select(p => p.PortfolioId).ToList();
         var selected = portfolioIds is null ? owned : owned.Where(portfolioIds.Contains).ToList();
         if (selected.Count == 0) selected = owned;
 
@@ -46,6 +55,12 @@ public sealed class ViewService(AppDbContext db, IQuoteCache quotes, IMarketStat
             fees.Value.MinFee, fees.Value.StockTaxRate, fees.Value.EtfTaxRate, quote.Value.StaleSeconds, m.State, now);
 
         var r = ViewCalculator.Build(holdings, quotes.Snapshot(), o);
+        return new ViewContext(r, m, o.DeductFees, now, ownedRows.ToDictionary(p => p.PortfolioId, p => p.Name));
+    }
+
+    private static ViewDto ToDto(ViewContext c)
+    {
+        var (r, m, now) = (c.Result, c.Market, c.AsOf);
         return new ViewDto(now,
             new MarketDto(m.State.ToString().ToLowerInvariant(), m.Stale,
                 m.LastFetchedAtUtc is { } t ? DateTime.SpecifyKind(t, DateTimeKind.Utc) : null),
