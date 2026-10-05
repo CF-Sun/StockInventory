@@ -1,4 +1,4 @@
-<#
+﻿<#
   [VERIFY] 實測腳本(Windows PowerShell 5.1 或 PowerShell 7 都可執行)。
   用途:實測 MIS(Q-01、Q-04)、標的主檔來源(Q-02)、休市日來源(Q-03),並把結果存成檔案與 summary.txt。
 
@@ -156,16 +156,16 @@ if ($ExDivSymbol -ne "") {
   $t = Get-Raw 'Q04_mis' (Mis-Url ('tse_' + $ExDivSymbol + '.tw')) $session
   Show-Fields $t
   $ym = (Get-Date).ToString('yyyyMMdd')
-  $t = Get-Raw 'Q04_stock_day' ("https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=$ym&stockNo=$ExDivSymbol&response=json") $null
+  $t = Get-Raw 'Q04_stock_day' ('https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=' + $ym + '&stockNo=' + $ExDivSymbol + '&response=json') $null
   if ($t) {
     try {
       $j = $t | ConvertFrom-Json
-      Log "STOCK_DAY 欄位: $($j.fields -join ' | ')"
+      Log ('STOCK_DAY 欄位: ' + ($j.fields -join ' | '))
       $rows = @($j.data)
       $last = $rows | Select-Object -Last 3
       foreach ($row in $last) { Log ("  " + ($row -join ' | ')) }
       Log "請比較:MIS 的 y(昨收)是否等於上列『前一個交易日』的收盤價?若不同,代表 y 是除權息調整後的參考價。"
-    } catch { Log "  (STOCK_DAY 無法解析)" }
+    } catch { Log '  (STOCK_DAY 無法解析)' }
   }
 } else {
   Log "(未指定 -ExDivSymbol,略過。除權息日請以 -ExDivSymbol <代號> 重跑;今日除權息名單可看證交所『除權除息預告表』)"
@@ -176,7 +176,7 @@ if ($ExDivSymbol -ne "") {
 Log ""
 Log "############ Q-03:休市日 ############"
 $year = (Get-Date).Year
-$t = Get-Raw 'Q03_holiday_rwd' ("https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?date=$year&response=json") $null
+$t = Get-Raw 'Q03_holiday_rwd' ('https://www.twse.com.tw/rwd/zh/holidaySchedule/holidaySchedule?date=' + $year + '&response=json') $null
 Preview $t 1500
 $t = Get-Raw 'Q03_holiday_openapi' 'https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule' $null
 Preview $t 1500
@@ -216,4 +216,4 @@ $t = Get-Raw 'Q02_tpex_quotes' 'https://www.tpex.org.tw/openapi/v1/tpex_mainboar
 Preview $t 600
 
 Log ""
-Log "完成。請把 $summary 的內容貼給我;若 MIS 回應(Q01_B、Q01_D)內容很長,另外貼 verify-out 內該檔案的前 1500 字即可。"
+Log ('完成。請把 ' + $summary + ' 的內容貼給我;若 MIS 回應(Q01_B、Q01_D)內容很長,另外貼 verify-out 內該檔案的前 1500 字即可。')
