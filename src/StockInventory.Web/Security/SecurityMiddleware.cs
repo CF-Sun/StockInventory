@@ -47,8 +47,10 @@ public static class SecurityMiddleware
                 || HttpMethods.IsPut(ctx.Request.Method) || HttpMethods.IsDelete(ctx.Request.Method)))
             {
                 var af = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-                if (!await af.IsRequestValidAsync(ctx))
+                try { await af.ValidateRequestAsync(ctx); }
+                catch (AntiforgeryValidationException ex)
                 {
+                    ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Csrf").LogWarning("CSRF 驗證失敗:{Msg}", ex.Message);
                     await Problems.WriteAsync(ctx, 400, "VALIDATION_FAILED", "防偽權杖缺失或無效");
                     return;
                 }

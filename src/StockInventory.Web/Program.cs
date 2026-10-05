@@ -1,3 +1,4 @@
+using StockInventory.Web.Api;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using StockInventory.Data;
@@ -51,13 +52,14 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 if (!app.Environment.IsDevelopment()) app.UseHsts();
 app.UseSecurityHeaders();
-app.UseApiCsrf();
 app.UseAuthentication();
+app.UseApiCsrf(); // 必須在 UseAuthentication 之後,權杖才會綁定正確的使用者
 app.UseAuthorization();
 app.UseOnboardingGate();
 
 app.UseStaticFiles();
 app.MapRazorPages();
+app.MapAdminApi();
 app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();
 app.MapGet("/health", HealthEndpoint.HandleAsync).AllowAnonymous();
 

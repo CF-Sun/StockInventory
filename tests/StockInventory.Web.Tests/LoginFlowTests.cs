@@ -16,10 +16,10 @@ public class LoginFlowTests
         ["Seed:AdminUserName"] = "boss", ["Seed:AdminEmail"] = "boss@example.com", ["Seed:AdminInitialPassword"] = Pw,
     };
 
-    static HttpClient NewClient(TestFactory f) =>
+    internal static HttpClient NewClient(TestFactory f) =>
         f.CreateClient(new() { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
 
-    static async Task<HttpResponseMessage> Post(HttpClient c, string path, Dictionary<string, string> form, string? tokenPage = null)
+    internal static async Task<HttpResponseMessage> Post(HttpClient c, string path, Dictionary<string, string> form, string? tokenPage = null)
     {
         var page = await c.GetStringAsync(tokenPage ?? path);
         var token = Regex.Match(page, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
@@ -27,12 +27,12 @@ public class LoginFlowTests
         return await c.PostAsync(path, new FormUrlEncodedContent(form));
     }
 
-    static Task<HttpResponseMessage> Login(HttpClient c, string user, string pw) =>
+    internal static Task<HttpResponseMessage> Login(HttpClient c, string user, string pw) =>
         Post(c, "/Account/Login", new() { ["UserName"] = user, ["Password"] = pw });
 
-    static async Task<string> Body(HttpResponseMessage r) => WebUtility.HtmlDecode(await r.Content.ReadAsStringAsync());
+    internal static async Task<string> Body(HttpResponseMessage r) => WebUtility.HtmlDecode(await r.Content.ReadAsStringAsync());
 
-    static string Totp(string base32)
+    internal static string Totp(string base32)
     {
         const string alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         var bits = string.Concat(base32.Replace(" ", "").ToUpperInvariant().Select(ch => Convert.ToString(alpha.IndexOf(ch), 2).PadLeft(5, '0')));
