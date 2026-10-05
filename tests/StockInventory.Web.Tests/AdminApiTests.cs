@@ -14,7 +14,7 @@ public class AdminApiTests
     const string Pw = "Plain-Password-123";
 
     /// <summary>直接在資料庫建立「已改密碼且已啟用 TOTP」的使用者,再走真實登入流程。</summary>
-    static async Task<(HttpClient Client, string Csrf, Guid Id)> SignInAsync(TestFactory f, string name, params string[] roles)
+    internal static async Task<(HttpClient Client, string Csrf, Guid Id)> SignInAsync(TestFactory f, string name, params string[] roles)
     {
         string key;
         Guid id;
@@ -37,7 +37,7 @@ public class AdminApiTests
         return (c, csrf, id);
     }
 
-    static HttpRequestMessage Req(HttpMethod m, string url, string csrf, object? body = null)
+    internal static HttpRequestMessage Req(HttpMethod m, string url, string csrf, object? body = null)
     {
         var r = new HttpRequestMessage(m, url);
         r.Headers.Add("X-CSRF-TOKEN", csrf);
@@ -45,7 +45,7 @@ public class AdminApiTests
         return r;
     }
 
-    static async Task<JsonElement> Json(HttpResponseMessage r) => JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
+    internal static async Task<JsonElement> Json(HttpResponseMessage r) => JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
 
     [Fact]
     public async Task NonAdmin_Gets403()

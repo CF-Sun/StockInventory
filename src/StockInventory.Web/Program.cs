@@ -34,6 +34,7 @@ builder.Services.Configure<DataProtectionDirOptions>(cfg.GetSection("DataProtect
 builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseSqlServer(cfg.GetConnectionString("Default") ?? "Server=;Database=StockInventory"));
 builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
+builder.Services.AddSingleton<IFetchRequester, NullFetchRequester>();
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);
 builder.Services.AddAuthorization();
@@ -60,6 +61,7 @@ app.UseOnboardingGate();
 app.UseStaticFiles();
 app.MapRazorPages();
 app.MapAdminApi();
+app.MapPortfolioApi();
 app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();
 app.MapGet("/health", HealthEndpoint.HandleAsync).AllowAnonymous();
 

@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using StockInventory.Data;
 using StockInventory.Web.Security;
 
+using static StockInventory.Web.Api.ApiResults;
+
 namespace StockInventory.Web.Api;
 
 public sealed record CreateUserRequest(string? UserName, string? Email, string? DisplayName, string? InitialPassword);
@@ -124,12 +126,4 @@ public static class AdminApi
             for (var i = 0; i < span.Length; i++) span[i] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
         });
     }
-
-    private static IResult Problem(HttpContext ctx, int status, string code, string title) =>
-        Results.Problem(statusCode: status, title: title, type: $"https://stockinventory.newsafety.hk/problems/{code.ToLowerInvariant().Replace('_', '-')}",
-            extensions: new Dictionary<string, object?> { ["code"] = code });
-
-    private static IResult Invalid(HttpContext ctx, IDictionary<string, string[]> errors) =>
-        Results.Problem(statusCode: 400, title: "輸入資料有誤", type: "https://stockinventory.newsafety.hk/problems/validation",
-            extensions: new Dictionary<string, object?> { ["code"] = "VALIDATION_FAILED", ["errors"] = errors });
 }
