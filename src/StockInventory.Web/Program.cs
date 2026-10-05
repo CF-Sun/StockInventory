@@ -68,6 +68,7 @@ app.MapRazorPages();
 app.MapAdminApi();
 app.MapPortfolioApi();
 app.MapViewApi();
+app.MapSettingsApi();
 app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();
 app.MapGet("/health", HealthEndpoint.HandleAsync).AllowAnonymous();
 

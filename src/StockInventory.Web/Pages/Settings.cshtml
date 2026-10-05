@@ -1,0 +1,23 @@
+@page
+@model StockInventory.Web.Pages.SettingsModel
+@{ ViewData["Title"] = "設定"; }
+<h1>設定</h1>
+<div id="msg" class="err" role="alert" hidden></div>
+<div id="saved" class="ok" role="status" hidden>已儲存</div>
+<form id="form" class="card">
+  <fieldset>
+    <legend>顏色慣例</legend>
+    <div class="check"><input type="radio" id="c0" name="color" value="0" /><label for="c0">紅漲綠跌(預設)</label></div>
+    <div class="check"><input type="radio" id="c1" name="color" value="1" /><label for="c1">綠漲紅跌</label></div>
+  </fieldset>
+  <fieldset>
+    <legend>損益計算</legend>
+    <div class="check"><input type="checkbox" id="deduct" /><label for="deduct">扣除預估手續費與證交稅(預設只算帳面損益,僅供參考)</label></div>
+    <label for="fee-rate">手續費率(0 到 0.01,預設 0.001425)</label>
+    <input id="fee-rate" type="text" inputmode="decimal" autocomplete="off" />
+    <label for="fee-discount">手續費折扣(0.001 到 1,1 代表無折扣,0.28 代表 2.8 折)</label>
+    <input id="fee-discount" type="text" inputmode="decimal" autocomplete="off" />
+  </fieldset>
+  <button type="submit">儲存</button>
+</form>
+<script src="~/js/settings.js"></script>
