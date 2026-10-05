@@ -1,0 +1,24 @@
+@page
+@model StockInventory.Web.Pages.Admin.UsersModel
+@{ ViewData["Title"] = "使用者管理"; }
+<h1>使用者管理</h1>
+<div id="msg" class="err" role="alert" hidden></div>
+<div id="temp" class="card" hidden>
+  <p>臨時密碼(只顯示這一次,請立即交給使用者):</p>
+  <p><code id="temp-pw"></code></p>
+</div>
+<section class="card">
+  <h2>新增使用者</h2>
+  <form id="create-form">
+    <label for="c-user">帳號</label><input id="c-user" type="text" autocomplete="off" />
+    <label for="c-email">Email</label><input id="c-email" type="text" autocomplete="off" />
+    <label for="c-name">顯示名稱</label><input id="c-name" type="text" autocomplete="off" />
+    <label for="c-pw">初始密碼(至少 12 字元)</label><input id="c-pw" type="password" autocomplete="new-password" />
+    <button type="submit">建立</button>
+  </form>
+</section>
+<section>
+  <h2>使用者</h2>
+  <div id="users"></div>
+</section>
+<script src="~/js/admin-users.js"></script>

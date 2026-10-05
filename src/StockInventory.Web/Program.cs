@@ -37,10 +37,11 @@ builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
 builder.Services.AddSingleton<IFetchRequester, NullFetchRequester>();
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(o => o.AddPolicy("AdminOnly", p => p.RequireRole(Roles.Admin)));
 builder.Services.AddRazorPages(o =>
 {
     o.Conventions.AuthorizeFolder("/");
+    o.Conventions.AuthorizeFolder("/Admin", "AdminOnly");
     foreach (var page in new[] { "/Account/Login", "/Account/LoginWith2fa", "/Account/LoginWithRecoveryCode", "/Account/Logout" })
         o.Conventions.AllowAnonymousToPage(page);
 });

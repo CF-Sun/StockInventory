@@ -173,3 +173,23 @@ public class AdminApiTests
         Assert.Equal(0, await um2.CountRecoveryCodesAsync(u));
     }
 }
+
+public class AdminPageTests
+{
+    [Fact]
+    public async Task AdminPage_AdminSees200_UserIsRejected_ScriptServedFromSite()
+    {
+        using var f = new TestFactory();
+        var (admin, _, _) = await AdminApiTests.SignInAsync(f, "boss", "Admin");
+        var page = await admin.GetAsync("/Admin/Users");
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        var html = await page.Content.ReadAsStringAsync();
+        Assert.Contains("/js/admin-users.js", html);
+        Assert.DoesNotContain("http://", html);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/js/admin-users.js")).StatusCode);
+
+        var (user, _, _) = await AdminApiTests.SignInAsync(f, "alice", "User");
+        var denied = await user.GetAsync("/Admin/Users");
+        Assert.NotEqual(HttpStatusCode.OK, denied.StatusCode);
+    }
+}
