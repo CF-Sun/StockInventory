@@ -4,6 +4,8 @@ using StockInventory.Data;
 using StockInventory.Quotes;
 using StockInventory.Web;
 using StockInventory.Web.Options;
+using StockInventory.Web.Security;
+using Microsoft.AspNetCore.Builder;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,9 +33,24 @@ builder.Services.Configure<DataProtectionDirOptions>(cfg.GetSection("DataProtect
 builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseSqlServer(cfg.GetConnectionString("Default") ?? "Server=;Database=StockInventory"));
 builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
+builder.Services.AddAppIdentity(cfg);
+builder.Services.AddCloudflareForwarding(cfg);
+builder.Services.AddAuthorization();
+builder.Services.AddAntiforgery(o => { o.HeaderName = "X-CSRF-TOKEN"; o.Cookie.Name = "si.csrf"; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; });
+builder.Services.AddHsts(o => { o.MaxAge = TimeSpan.FromSeconds(15552000); o.IncludeSubDomains = false; o.Preload = false; });
+builder.Services.AddHostedService<AdminSeeder>();
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
+if (!app.Environment.IsDevelopment()) app.UseHsts();
+app.UseSecurityHeaders();
+app.UseApiCsrf();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseOnboardingGate();
+
+app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();
 app.MapGet("/health", HealthEndpoint.HandleAsync).AllowAnonymous();
 
 app.Run();
