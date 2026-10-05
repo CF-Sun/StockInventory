@@ -1,0 +1,14 @@
+@page
+@model StockInventory.Web.Pages.PortfoliosModel
+@{ ViewData["Title"] = "庫存管理"; }
+<h1>庫存管理</h1>
+<div id="msg" class="err" role="alert" hidden></div>
+<section class="card">
+  <form id="create-form">
+    <label for="new-name">新增庫存</label>
+    <input id="new-name" type="text" maxlength="30" autocomplete="off" />
+    <button type="submit">新增</button>
+  </form>
+</section>
+<section id="list"></section>
+<script src="~/js/portfolios.js"></script>

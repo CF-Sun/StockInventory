@@ -16,3 +16,12 @@ button{margin-top:16px;width:100%;padding:12px;border:0;border-radius:6px;backgr
 .qr svg{width:200px;height:200px;background:#fff;padding:8px;border-radius:6px}
 code{word-break:break-all}
 nav{display:flex;justify-content:space-between;padding:8px 16px}
+main{max-width:720px}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.row button,.holding button{width:auto;margin:8px 8px 0 0;padding:6px 12px}
+.holding{border-top:1px solid var(--border);padding:8px 0}
+.add{border-top:1px solid var(--border);margin-top:8px;padding-top:8px}
+.add input{width:100%;margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
+.add button{margin-top:8px}
+section{margin-top:16px}
+nav a{margin-right:12px;color:var(--accent)}

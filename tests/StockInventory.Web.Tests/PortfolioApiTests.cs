@@ -215,3 +215,32 @@ public class PortfolioApiTests
         Assert.Equal(HttpStatusCode.BadRequest, (await c.GetAsync("/api/instruments/search?q=" + new string('1', 21))).StatusCode);
     }
 }
+
+public class PortfolioPageTests
+{
+    [Fact]
+    public async Task Page_Served_ListHoldings_IsOwnerScoped_NoPrices()
+    {
+        using var f = new TestFactory();
+        using (var s = f.Services.CreateScope())
+        {
+            var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Instruments.Add(new Instrument { Symbol = "0050", Name = "元大台灣50", Market = Market.Twse, Kind = InstrumentKind.Etf, UpdatedAtUtc = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        var (a, ca, _) = await AdminApiTests.SignInAsync(f, "alice", "User");
+        var (b, _, _) = await AdminApiTests.SignInAsync(f, "bob", "User");
+        Assert.Equal(HttpStatusCode.OK, (await a.GetAsync("/Portfolios")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await a.GetAsync("/js/portfolios.js")).StatusCode);
+
+        var created = await a.SendAsync(AdminApiTests.Req(HttpMethod.Post, "/api/portfolios", ca, new { name = "A" }));
+        var pid = (await AdminApiTests.Json(created)).GetProperty("id").GetInt32();
+        await a.SendAsync(AdminApiTests.Req(HttpMethod.Post, $"/api/portfolios/{pid}/holdings", ca, new { symbol = "0050", totalCost = 280000, shares = 2000 }));
+
+        var list = await AdminApiTests.Json(await a.GetAsync($"/api/portfolios/{pid}/holdings"));
+        Assert.Equal("元大台灣50", list[0].GetProperty("name").GetString());
+        Assert.Equal(280000, list[0].GetProperty("totalCost").GetInt64());
+        Assert.False(list[0].TryGetProperty("lastPrice", out _));
+        Assert.Equal(HttpStatusCode.NotFound, (await b.GetAsync($"/api/portfolios/{pid}/holdings")).StatusCode);
+    }
+}

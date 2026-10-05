@@ -10,7 +10,10 @@
   @if (User.Identity?.IsAuthenticated == true)
   {
     <nav>
-      <span>@User.Identity!.Name</span>
+      <span>
+        <a href="/">總覽</a> <a href="/Portfolios">庫存管理</a>
+        @if (User.IsInRole("Admin")) { <a href="/Admin/Users">使用者</a> }
+      </span>
       <form method="post" asp-page="/Account/Logout"><button type="submit" style="width:auto;margin:0;padding:6px 12px">登出</button></form>
     </nav>
   }

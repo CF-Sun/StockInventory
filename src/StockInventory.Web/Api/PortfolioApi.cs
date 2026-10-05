@@ -111,6 +111,17 @@ public static class PortfolioApi
             return Results.NoContent();
         });
 
+        // 規格外的輔助端點:列出單一庫存的持股(不含價格),供 /Portfolios 頁面使用
+        g.MapGet("/portfolios/{id:int}/holdings", async (int id, AppDbContext db, ICurrentUser me, HttpContext ctx) =>
+        {
+            var uid = me.UserId;
+            if (!await db.Portfolios.AnyAsync(x => x.PortfolioId == id && x.UserId == uid)) return NotFound(ctx);
+            var rows = await db.Holdings.AsNoTracking().Where(h => h.PortfolioId == id)
+                .OrderBy(h => h.Symbol)
+                .Select(h => new HoldingListDto(h.HoldingId, h.Symbol, h.Instrument!.Name, h.TotalCost, h.Shares)).ToListAsync();
+            return Results.Json(rows);
+        });
+
         g.MapPost("/portfolios/{id:int}/holdings", async (int id, HoldingCreateRequest r, AppDbContext db, ICurrentUser me,
             HttpContext ctx, IOptions<LimitsOptions> limits, IFetchRequester fetch) =>
         {
@@ -214,6 +225,8 @@ public static class PortfolioApi
         NewTotalCost = now?.TotalCost, NewShares = now?.Shares, ChangedAtUtc = at,
     };
 }
+
+public sealed record HoldingListDto(int HoldingId, string Symbol, string Name, long TotalCost, long Shares);
 
 public sealed record PortfolioDto(int Id, string Name, int SortOrder, int HoldingCount);
 
