@@ -35,6 +35,9 @@ builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseSqlServer(cfg.GetConnectionString("Default") ?? "Server=;Database=StockInventory"));
 builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
 builder.Services.AddSingleton<IFetchRequester, NullFetchRequester>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IQuoteCache, FakeQuoteProvider>(); // P4 完成前使用假報價(§14)
+builder.Services.AddScoped<StockInventory.Web.Services.ViewService>();
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);
 builder.Services.AddAuthorization(o => o.AddPolicy("AdminOnly", p => p.RequireRole(Roles.Admin)));
@@ -48,6 +51,7 @@ builder.Services.AddRazorPages(o =>
 builder.Services.AddAntiforgery(o => { o.HeaderName = "X-CSRF-TOKEN"; o.Cookie.Name = "si.csrf"; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; });
 builder.Services.AddHsts(o => { o.MaxAge = TimeSpan.FromSeconds(15552000); o.IncludeSubDomains = false; o.Preload = false; });
 builder.Services.AddHostedService<AdminSeeder>();
+builder.Services.AddHostedService<SampleInstrumentSeeder>();
 
 var app = builder.Build();
 
@@ -63,6 +67,7 @@ app.UseStaticFiles();
 app.MapRazorPages();
 app.MapAdminApi();
 app.MapPortfolioApi();
+app.MapViewApi();
 app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();
 app.MapGet("/health", HealthEndpoint.HandleAsync).AllowAnonymous();
 
