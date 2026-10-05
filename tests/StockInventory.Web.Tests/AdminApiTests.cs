@@ -14,7 +14,9 @@ public class AdminApiTests
     const string Pw = "Plain-Password-123";
 
     /// <summary>直接在資料庫建立「已改密碼且已啟用 TOTP」的使用者,再走真實登入流程。</summary>
-    internal static async Task<(HttpClient Client, string Csrf, Guid Id)> SignInAsync(TestFactory f, string name, params string[] roles)
+    internal static async Task<(HttpClient Client, string Csrf, Guid Id)> SignInAsync(TestFactory f, string name, params string[] roles) => await SignInAsync(f, name, null, roles);
+
+    internal static async Task<(HttpClient Client, string Csrf, Guid Id)> SignInAsync(TestFactory f, string name, HttpClient? client, params string[] roles)
     {
         string key;
         Guid id;
@@ -30,7 +32,7 @@ public class AdminApiTests
             key = (await um.GetAuthenticatorKeyAsync(u))!;
             id = u.Id;
         }
-        var c = L.NewClient(f);
+        var c = client ?? L.NewClient(f);
         await L.Login(c, name, Pw);
         await L.Post(c, "/Account/LoginWith2fa", new() { ["Code"] = L.Totp(key) });
         var csrf = JsonDocument.Parse(await c.GetStringAsync("/api/csrf")).RootElement.GetProperty("token").GetString()!;

@@ -59,3 +59,4 @@ main.wide{max-width:1100px}
 .tag{font-size:.75rem;padding:1px 6px;border-radius:4px;background:var(--gray-bg);color:var(--gray-fg);margin-left:6px}
 .linkbtn{width:auto;margin:0;padding:0 6px;background:none;color:var(--accent)}
 @media (min-width:768px){.tbl{display:table}.cards{display:none}}
+.navbtn{width:auto;margin:0;padding:6px 12px}

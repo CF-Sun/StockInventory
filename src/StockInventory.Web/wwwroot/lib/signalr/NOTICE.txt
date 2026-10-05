@@ -1,0 +1,2 @@
+Microsoft SignalR JavaScript client (@microsoft/signalr 8.x), vendored from npm.
+License: MIT (see package.json of the npm package). Served from this site; no CDN is used.

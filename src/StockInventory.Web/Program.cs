@@ -33,11 +33,37 @@ builder.Services.Configure<DataProtectionDirOptions>(cfg.GetSection("DataProtect
 
 // 連線字串只從環境變數/部署設定來,不放進 appsettings.json;缺少時 /health 會回報 db 失敗,不讓網站啟動失敗
 builder.Services.AddDbContext<AppDbContext>(o =>
-    o.UseSqlServer(cfg.GetConnectionString("Default") ?? "Server=;Database=StockInventory"));
-builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
-builder.Services.AddSingleton<IFetchRequester, NullFetchRequester>();
+{
+    // 開發用:Dev:UseInMemoryDatabase=true 時不連 SQL Server(資料只存在記憶體,重啟即消失)。正式環境不要開啟。
+    if (cfg.GetValue<bool>("Dev:UseInMemoryDatabase")) o.UseInMemoryDatabase("StockInventoryDev");
+    else o.UseSqlServer(cfg.GetConnectionString("Default") ?? "Server=;Database=StockInventory");
+});
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IQuoteCache, FakeQuoteProvider>(); // P4 完成前使用假報價(§14)
+builder.Services.AddSingleton<StockInventory.Web.Hubs.ConnectionRegistry>();
+builder.Services.AddSingleton<IActiveConnectionCounter>(sp => sp.GetRequiredService<StockInventory.Web.Hubs.ConnectionRegistry>());
+builder.Services.AddSingleton<IQuoteSubscriber, StockInventory.Web.Hubs.ViewBroadcaster>();
+builder.Services.AddSingleton<IAlertSender, SmtpAlertSender>();
+builder.Services.AddSingleton<IQuoteSubscriber, StaleAlertSubscriber>();
+builder.Services.AddSingleton<LoginFailureAlerts>();
+if (cfg.GetValue("Quote:Enabled", true))
+{
+    // 真正的報價服務(T4.3)
+    builder.Services.AddSingleton<QuoteCacheStore>();
+    builder.Services.AddSingleton<IQuoteCache>(sp => sp.GetRequiredService<QuoteCacheStore>());
+    builder.Services.AddHttpClient<IMisClient, MisClient>(c => c.DefaultRequestHeaders.UserAgent.ParseAdd("StockInventory/1.0"));
+    builder.Services.AddSingleton<QuoteFetcher>();
+    builder.Services.AddSingleton<IMarketStatusSource>(sp => sp.GetRequiredService<QuoteFetcher>());
+    builder.Services.AddSingleton<IFetchRequester>(sp => sp.GetRequiredService<QuoteFetcher>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<QuoteFetcher>());
+}
+else
+{
+    // Quote:Enabled=false:使用假報價(§14),供開發與測試
+    builder.Services.AddSingleton<IQuoteCache, FakeQuoteProvider>();
+    builder.Services.AddSingleton<IMarketStatusSource, NullMarketStatusSource>();
+    builder.Services.AddSingleton<IFetchRequester, NullFetchRequester>();
+}
+builder.Services.AddSignalR();
 builder.Services.AddScoped<StockInventory.Web.Services.ViewService>();
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);
@@ -66,6 +92,7 @@ app.UseOnboardingGate();
 
 app.UseStaticFiles();
 app.MapRazorPages();
+app.MapHub<StockInventory.Web.Hubs.ViewHub>("/hubs/view");
 app.MapAdminApi();
 app.MapPortfolioApi();
 app.MapViewApi();

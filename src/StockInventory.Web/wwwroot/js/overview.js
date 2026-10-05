@@ -115,7 +115,9 @@
   }
   function choose(ids) {
     selected = ids;
-    renderChips(); updateUrl(); saveSelection(); loadView();
+    renderChips(); updateUrl(); saveSelection();
+    if (connected()) conn.invoke('SetView', selected, true).catch(loadView); // 伺服器立即推一次 ViewUpdated
+    else loadView();
   }
 
   // ---------- 畫面 ----------
@@ -278,6 +280,42 @@
     return wrap;
   }
 
+  // ---------- 即時更新(§9、§12.4) ----------
+  var conn = null, pollTimer = null, retryTimer = null;
+  function connected() { return conn && conn.state === signalR.HubConnectionState.Connected; }
+
+  // 連線中斷期間,頁面可見時每 5 秒輪詢 API-06;連線恢復後停止
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () { if (!document.hidden) loadView(); }, 5000);
+  }
+  function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+
+  async function attach() {
+    stopPolling();
+    await conn.invoke('SetView', selected, true);
+    if (document.hidden) conn.invoke('Pause').catch(function () {});
+  }
+
+  function connect() {
+    if (typeof signalR === 'undefined') { startPolling(); return; }
+    conn = new signalR.HubConnectionBuilder()
+      .withUrl('/hubs/view')
+      .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+      .build();
+    conn.on('ViewUpdated', function (v) { view = v; errorEl.hidden = true; render(); }); // 整份取代
+    conn.on('MarketStatus', function (m) { if (view) { view.market = m; renderBanner(); } });
+    conn.onreconnecting(startPolling);
+    conn.onreconnected(function () { attach().catch(startPolling); });
+    conn.onclose(function () { startPolling(); retryTimer = setTimeout(connect, 30000); }); // 自動重連用盡後仍每 30 秒再試
+    conn.start().then(attach).catch(function () { startPolling(); retryTimer = setTimeout(connect, 30000); });
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (!connected()) { if (!document.hidden) loadView(); return; }
+    conn.invoke(document.hidden ? 'Pause' : 'Resume').catch(function () {}); // 回到前景時 Resume 會立即補一次
+  });
+
   // ---------- 啟動 ----------
   function parseUrlSelection(ids) {
     var raw = new URL(location.href).searchParams.get('p');
@@ -288,7 +326,6 @@
 
   async function init() {
     document.getElementById('retry').addEventListener('click', loadView);
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) loadView(); });
     try {
       var all = await Promise.all([json('/api/portfolios'), json('/api/settings')]);
       portfolios = all[0]; settings = all[1];
@@ -301,9 +338,8 @@
     var saved = (settings.selectedPortfolioIds || []).filter(function (n) { return ids.indexOf(n) >= 0; });
     selected = fromUrl || (saved.length ? saved : null);
     renderChips(); updateUrl();
-    await loadView();
-    // P4 以 SignalR 取代;在此之前頁面可見時每 5 秒更新一次(§9 的輪詢備援)
-    setInterval(function () { if (!document.hidden) loadView(); }, 5000);
+    await loadView();  // 1. 先 GET /api/holdings 畫出畫面
+    connect();         // 2. 再建立 SignalR 連線並 SetView
   }
 
   init();
