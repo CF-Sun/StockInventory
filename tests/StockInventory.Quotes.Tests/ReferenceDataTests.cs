@@ -201,3 +201,25 @@ public class ReferenceDataTests
         Assert.Equal(6, (await All(sp)).Count);
     }
 }
+
+public class IsinRealSampleTests // 真實頁面開頭(2026-10-06,使用者從 Q02_isin_listed.bin 貼出)
+{
+    [Fact]
+    public void RealPageHead_Parses15Stocks_WithHeaderAndSectionRowsIgnored()
+    {
+        var html = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Samples", "real_isin_listed_head.html"));
+        var r = IsinParser.Parse(html, Market.Twse);
+        Assert.Equal(15, r.Count);
+        Assert.All(r, x => Assert.Equal((InstrumentKind.Stock, Market.Twse), (x.Kind, x.Market)));
+        Assert.Equal("台泥", r.Single(x => x.Symbol == "1101").Name);
+        Assert.Equal("愛之味", r.Single(x => x.Symbol == "1217").Name);
+        Assert.DoesNotContain(r, x => x.Name.Contains("CFICode") || x.Symbol.Contains("有價證券"));
+    }
+
+    [Fact] // 標籤大小寫不影響解析
+    public void UppercaseTags_AreParsed()
+    {
+        var html = "<TABLE><TR><TD>2330　台積電</TD><TD>TW0002330008</TD><TD>1994/09/05</TD><TD>上市</TD><TD>半導體業</TD><TD>ESVUFR</TD><TD></TD></TR></TABLE>";
+        Assert.Single(IsinParser.Parse(html.Replace("<TR>", "<tr>"), Market.Twse)); // 列起點以 <tr> 切(實際頁面為小寫)
+    }
+}

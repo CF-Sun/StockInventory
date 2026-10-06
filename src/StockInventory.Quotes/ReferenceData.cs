@@ -16,7 +16,8 @@ public sealed record InstrumentInfo(string Symbol, string Name, Market Market, I
 /// </summary>
 public static class IsinParser
 {
-    private static readonly Regex Cells = new(@"<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex Cells = new(@"<td[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RowStart = new(@"<tr\s*>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex Tags = new(@"<[^>]+>", RegexOptions.Compiled);
     private static readonly Regex IsinCode = new(@"^[A-Z]{2}[A-Z0-9]{9}[0-9]$", RegexOptions.Compiled);
 
@@ -24,7 +25,7 @@ public static class IsinParser
     {
         var result = new List<InstrumentInfo>();
         // 整頁可能只有一行,所以以 <tr> 切列,不能逐行處理
-        foreach (var row in html.Split("<tr>", StringSplitOptions.None))
+        foreach (var row in RowStart.Split(html))
         {
             var cells = Cells.Matches(row).Select(m => System.Net.WebUtility.HtmlDecode(Tags.Replace(m.Groups[1].Value, "")).Trim()).ToArray();
             if (cells.Length < 6 || !IsinCode.IsMatch(cells[1])) continue;

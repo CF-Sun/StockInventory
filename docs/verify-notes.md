@@ -53,7 +53,7 @@
 `tests/StockInventory.Quotes.Tests/Samples/` 內:
 - **真實樣本**(2026-10-06 實測):`real_tse_etf_z_dash.json`(0050 盤中,`z` 為 `-` 且有 `trade`)、`real_unknown_symbol.json`(查無代號)、`real_holiday_2026.json`(休市日,依實測回應的 27 筆資料重建)。
 - **合成樣本**(依規格描述手寫,不是真實回應):`normal_tse.json`、`no_trade_with_quotes.json`、`only_prevclose.json`、`no_price.json`、`empty.json`、`otc.json`、`html_error.html`。
-- ISIN 清單的測試 HTML 是依實測欄位結構手寫的最小頁面;完整的頁面解析邏輯已用真實頁面以 PowerShell 版跑過(統計結果見上),但 C# 解析器沒有對真實頁面跑過。
+- `real_isin_listed_head.html`:真實上市 ISIN 頁面開頭(使用者貼出,15 檔股票;以該片段的結構重建),C# 解析器已對它測試。完整 9 MB 頁面以 PowerShell 版跑過(統計結果見上),C# 解析器沒有對完整頁面跑過。其餘 ISIN 測試用的 HTML 是依同樣結構手寫的。
 
 ## 規格內部矛盾(已解決)
 
