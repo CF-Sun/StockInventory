@@ -10,15 +10,17 @@
   這個腳本只對外送出 GET 請求,不會修改任何東西。本腳本在撰寫時未能實際執行(沙盒連不到這些網站),若有語法錯誤請把錯誤訊息貼給我。
 #>
 param(
-  [string]$ExDivSymbol = ""
+  [string]$ExDivSymbol = "",
+  [string]$Sections = "Q01,Q02,Q03,Q04"   # 只想重跑某幾段時使用,例如 -Sections Q02
 )
+$run = $Sections.Split(',') | ForEach-Object { $_.Trim().ToUpper() }
 
 $ErrorActionPreference = 'Continue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 $out = Join-Path $PSScriptRoot 'verify-out'
 New-Item -ItemType Directory -Force -Path $out | Out-Null
-$summary = Join-Path $out 'summary.txt'
+$summary = Join-Path $out ('summary-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
 Set-Content -Path $summary -Value ("實測時間(本機):" + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')) -Encoding UTF8
 
 function Log([string]$text) {
@@ -81,11 +83,12 @@ function Show-Fields($text) {
   }
 }
 
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+if ($run -contains 'Q01') {
 Log ""
 Log "############ Q-01:MIS ############"
 
 # --- A. 先取得 session cookie(基本市況頁)---
-$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $null = Get-Raw 'Q01_A_index_page' 'https://mis.twse.com.tw/stock/index.jsp' $session
 $cookieNames = ($session.Cookies.GetCookies('https://mis.twse.com.tw') | ForEach-Object { $_.Name }) -join ','
 Log ("取得的 cookie 名稱: [" + $cookieNames + "]")
@@ -150,6 +153,9 @@ $t = Get-Raw 'Q01_G_unknown_symbol' (Mis-Url 'tse_9999999.tw') $session
 Show-Fields $t
 Preview $t 600
 
+}
+
+if ($run -contains 'Q04') {
 Log ""
 Log "############ Q-04:除權息日昨收 ############"
 if ($ExDivSymbol -ne "") {
@@ -173,6 +179,9 @@ if ($ExDivSymbol -ne "") {
   Preview $t 1200
 }
 
+}
+
+if ($run -contains 'Q03') {
 Log ""
 Log "############ Q-03:休市日 ############"
 $year = (Get-Date).Year
@@ -181,6 +190,9 @@ Preview $t 1500
 $t = Get-Raw 'Q03_holiday_openapi' 'https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule' $null
 Preview $t 1500
 
+}
+
+if ($run -contains 'Q02') {
 Log ""
 Log "############ Q-02:標的主檔(上市、上櫃的股票與 ETF)############"
 foreach ($mode in @(@{ n = 'Q02_isin_listed'; m = 2 }, @{ n = 'Q02_isin_otc'; m = 4 })) {
@@ -189,21 +201,38 @@ foreach ($mode in @(@{ n = 'Q02_isin_listed'; m = 2 }, @{ n = 'Q02_isin_otc'; m 
   Log ("=== " + $mode.n + " ===")
   Log "URL: $url"
   try {
-    $r = Invoke-WebRequest -Uri $url -UseBasicParsing -UserAgent $ua -TimeoutSec 30
+    $r = Invoke-WebRequest -Uri $url -UseBasicParsing -UserAgent $ua -TimeoutSec 60
     $bytes = $r.RawContentStream.ToArray()
     [IO.File]::WriteAllBytes((Join-Path $out ($mode.n + '.bin')), $bytes)
     $text = $null
     try { $text = [Text.Encoding]::GetEncoding(950).GetString($bytes) } catch { $text = [Text.Encoding]::UTF8.GetString($bytes) }
     Log ("狀態: {0}  大小: {1} bytes" -f $r.StatusCode, $bytes.Length)
-    Log ("CFICode ESVUFR(疑似股票)出現次數: " + ([regex]::Matches($text, 'ESVUFR')).Count)
-    Log ("CFICode CEOGEU(疑似 ETF)出現次數: " + ([regex]::Matches($text, 'CEOGEU')).Count)
-    foreach ($sym in @('0050', '0056', '00878', '2330', '6488', '6669')) {
-      $m = [regex]::Match($text, '<tr>[^\r\n]*?>' + $sym + '[^\r\n]*')
-      if ($m.Success) {
-        $row = $m.Value -replace '<[^>]+>', ' | ' -replace '\s+', ' '
-        Log ("  " + $sym + ": " + $row)
+
+    # 以 <tr> 切列(整頁可能只有一行,不能用逐行比對);欄位:代號及名稱 | ISIN | 上市日 | 市場別 | 產業別 | CFICode | 備註
+    $rows = $text.Split([string[]]@('<tr>'), [StringSplitOptions]::None)
+    $section = ''
+    $count = @{}
+    $example = @{}
+    $targets = @('0050', '0056', '00878', '2330', '6488', '6669')
+    $found = @{}
+    foreach ($row in $rows) {
+      $cells = @([regex]::Matches($row, '(?s)<td[^>]*>(.*?)</td>') | ForEach-Object { ($_.Groups[1].Value -replace '<[^>]+>', '').Trim() })
+      if ($cells.Count -eq 1) { $section = $cells[0]; continue }
+      if ($cells.Count -lt 6) { continue }
+      if ($cells[1] -notmatch '^[A-Z]{2}[A-Z0-9]{9}[0-9]$') { continue }
+      $key = $section + ' | ' + $cells[5]
+      if ($count.ContainsKey($key)) { $count[$key] = $count[$key] + 1 } else { $count[$key] = 1; $example[$key] = $cells[0] }
+      foreach ($sym in $targets) {
+        if (-not $found.ContainsKey($sym) -and ($cells[0].StartsWith($sym + [string][char]0x3000) -or $cells[0].StartsWith($sym + ' '))) {
+          $found[$sym] = ($cells -join ' | ')
+        }
       }
     }
+    Log "各『區段 | CFICode』的筆數與範例(用來判斷如何分辨股票與 ETF):"
+    foreach ($k in ($count.Keys | Sort-Object { -$count[$_] } | Select-Object -First 25)) {
+      Log ("  {0}  共 {1} 筆  例: {2}" -f $k, $count[$k], $example[$k])
+    }
+    foreach ($sym in $targets) { if ($found.ContainsKey($sym)) { Log ("  " + $sym + ": " + $found[$sym]) } else { Log ("  " + $sym + ": (此清單中沒有)") } }
   } catch {
     Log ("失敗: " + $_.Exception.Message)
   }
@@ -214,6 +243,7 @@ $t = Get-Raw 'Q02_openapi_stock_day_all' 'https://openapi.twse.com.tw/v1/exchang
 Preview $t 600
 $t = Get-Raw 'Q02_tpex_quotes' 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes' $null
 Preview $t 600
+}
 
 Log ""
 Log ('完成。請把 ' + $summary + ' 的內容貼給我;若 MIS 回應(Q01_B、Q01_D)內容很長,另外貼 verify-out 內該檔案的前 1500 字即可。')
