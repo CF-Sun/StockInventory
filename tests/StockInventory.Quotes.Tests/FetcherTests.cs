@@ -68,6 +68,15 @@ public class FetcherTests
             await d.SaveChangesAsync();
         }
 
+        public async Task Seed2(string sym, Market m)
+        {
+            using var s = Sp.CreateScope();
+            var d = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            d.Instruments.Add(new Instrument { Symbol = sym, Name = sym, Market = m, Kind = InstrumentKind.Stock, UpdatedAtUtc = DateTime.UtcNow });
+            d.Holdings.Add(new Holding { PortfolioId = 1, Symbol = sym, TotalCost = 1, Shares = 1, CreatedAtUtc = DateTime.UtcNow, UpdatedAtUtc = DateTime.UtcNow });
+            await d.SaveChangesAsync();
+        }
+
         public async Task<List<QuoteRow>> Rows()
         {
             using var s = Sp.CreateScope();
@@ -101,17 +110,54 @@ public class FetcherTests
     }
 
     [Fact]
-    public async Task Closed_NoFetch()
+    public async Task Closed_StateIsReported_AndCachedSymbolsAreNotRefetched()
     {
         var e = new Env();
         e.Clock.SetUtcNow(new DateTimeOffset(2026, 10, 5, 7, 0, 0, TimeSpan.Zero)); // 15:00 Taipei
         await e.Seed(("2330", Market.Twse));
+        e.Cache.Set("2330", new QuoteInput(600m, 610m, PriceSource.Trade, DateTime.UtcNow));
         await e.Fetcher.TickAsync(default);
-        Assert.Empty(e.Client.Calls);
+        Assert.Empty(e.Client.Calls);                                            // 已有價格:收盤後不抓
         Assert.Equal(MarketState.Closed, e.Fetcher.Get().State);
         e.Clock.SetUtcNow(new DateTimeOffset(2026, 10, 10, 2, 0, 0, TimeSpan.Zero)); // 週六
         await e.Fetcher.TickAsync(default);
+        Assert.Empty(e.Client.Calls);
         Assert.Equal(MarketState.Holiday, e.Fetcher.Get().State);
+    }
+
+    [Fact] // 收盤後新增的持股(快取沒有價格)要能立刻補抓,而不是等到下個開盤日
+    public async Task Closed_FetchesOnlyMissingSymbols_WithThrottle_AndPriorityBypass()
+    {
+        var e = new Env();
+        e.Clock.SetUtcNow(new DateTimeOffset(2026, 10, 5, 7, 0, 0, TimeSpan.Zero)); // 15:00 Taipei,已收盤
+        await e.Seed(("2330", Market.Twse), ("1605", Market.Twse));
+        e.Cache.Set("2330", new QuoteInput(600m, 610m, PriceSource.Trade, DateTime.UtcNow));
+        e.Client.Respond = _ => Body(("1605", "30.5000", "30.0000"));
+
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal("tse_1605.tw", e.Client.Calls.Single());                    // 只抓缺價的 1605
+        Assert.Equal(30.5m, e.Cache.Snapshot()["1605"].LastPrice);
+        Assert.Equal(MarketState.Closed, e.Fetcher.Get().State);
+
+        e.Clock.Advance(TimeSpan.FromSeconds(5));
+        await e.Fetcher.TickAsync(default);
+        Assert.Single(e.Client.Calls);                                           // 已補到價格,不再抓
+
+        // 抓不到價格的標的:最多每 300 秒試一次,不會整晚每 5 秒打 MIS
+        await e.Seed2("9999", Market.Twse);
+        e.Client.Respond = _ => """{"msgArray":[{"tv":"-","s":"-","c":"","z":"-"}]}""";
+        e.Fetcher.RequestImmediateFetch("9999");                                 // API 新增持股後會呼叫這個
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(2, e.Client.Calls.Count);
+        for (var i = 0; i < 10; i++) { e.Clock.Advance(TimeSpan.FromSeconds(5)); await e.Fetcher.TickAsync(default); }
+        Assert.Equal(2, e.Client.Calls.Count);                                   // 節流中
+        e.Clock.Advance(TimeSpan.FromSeconds(300));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(3, e.Client.Calls.Count);                                   // 超過 300 秒才再試
+
+        e.Fetcher.RequestImmediateFetch("9999");                                 // 新增持股的優先請求不受節流限制
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(4, e.Client.Calls.Count);
     }
 
     [Fact]

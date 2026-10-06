@@ -31,6 +31,7 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
     private MarketState _state = MarketState.Closed;
     private DateTime? _lastSuccessUtc;
     private DateTime? _lastRoundUtc;
+    private DateTime? _lastMissingRoundUtc;
     private int _failures;
     private DateTime _retryAtUtc = DateTime.MinValue;
     private HashSet<DateOnly> _holidays = [];
@@ -110,7 +111,9 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
             changed = !_hasPushedStatus || _lastPushed != (snap.State, snap.Stale);
         }
 
-        if (state == MarketState.Open) await FetchRoundAsync(nowUtc, ct);
+        // 開盤時段:正常抓取。非開盤:只補抓快取裡還沒有價格的標的(例如剛新增的持股),
+        // 否則新增的持股要等到下一個開盤日才有價格(MIS 收盤後仍會回傳收盤價,實測)。
+        await FetchRoundAsync(nowUtc, ct, onlyMissing: state != MarketState.Open);
 
         // 抓完後重算旗標,狀態或旗標改變時推送
         lock (_lock)
@@ -124,15 +127,20 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
             await Safe(() => s.OnTickAsync(snap, changed, ct));
     }
 
-    private async Task FetchRoundAsync(DateTime nowUtc, CancellationToken ct)
+    private async Task FetchRoundAsync(DateTime nowUtc, CancellationToken ct, bool onlyMissing = false)
     {
         var hasPriority = !_priority.IsEmpty;
-        if (_conns.ActiveCount == 0 && !hasPriority
+        if (onlyMissing)
+        {
+            // 非開盤補抓:除非有新增持股的優先請求,否則最多每 IdleIntervalSeconds 試一次,避免抓不到價的標的整晚重試
+            if (!hasPriority && _lastMissingRoundUtc is { } lm && (nowUtc - lm).TotalSeconds < _q.IdleIntervalSeconds) return;
+        }
+        else if (_conns.ActiveCount == 0 && !hasPriority
             && _lastRoundUtc is { } last && (nowUtc - last).TotalSeconds < _q.IdleIntervalSeconds)
             return;
         if (nowUtc < _retryAtUtc) return; // 失敗退避期
 
-        _lastRoundUtc = nowUtc;
+        if (onlyMissing) _lastMissingRoundUtc = nowUtc; else _lastRoundUtc = nowUtc;
         var priority = _priority.Keys.ToList();
         foreach (var k in priority) _priority.TryRemove(k, out _);
 
@@ -142,6 +150,11 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             symbols = (await db.Holdings.AsNoTracking().Select(h => new { h.Symbol, h.Instrument!.Market }).Distinct().ToListAsync(ct))
                 .Select(x => (x.Symbol, x.Market)).ToList();
+        }
+        if (onlyMissing)
+        {
+            var cached = _cache.Snapshot();
+            symbols = symbols.Where(x => !cached.ContainsKey(x.Symbol)).ToList();
         }
         if (symbols.Count == 0) return;
 

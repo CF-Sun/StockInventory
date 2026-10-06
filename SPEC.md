@@ -1,6 +1,6 @@
 # 股票即時庫存管理平台 — 開發規格(AI 實作版)
 
-- 版本:v1.2,日期 2026-10-06(v1.1:§7.4 `market.stale` 門檻修正;v1.2:依實測更新 §7.1、§7.2、§7.7、§16.1、§16.2)
+- 版本:v1.3,日期 2026-10-06(v1.1:§7.4 `market.stale` 門檻修正;v1.2:依實測更新 §7.1、§7.2、§7.7、§16.1、§16.2;v1.3:§7.3 非開盤時段補抓缺價標的)
 - 對應的人類閱讀版:線上文件「股票即時庫存管理平台 開發規格書」(內容一致,本檔為可直接實作的精簡、結構化版本)
 - 放置方式:放在專案根目錄;若使用 Claude Code,在 `CLAUDE.md` 加一行「規格見 SPEC.md,依 §14 階段逐步實作」;若使用其他工具(例如 `AGENTS.md`)同理。
 
@@ -485,7 +485,7 @@ ex_ch = 以 | 連接,每檔為  tse_{Symbol}.tw(上市,Market = 1)  或  otc_{Sy
 每 Quote:ActiveIntervalSeconds(5 秒)喚醒一次:
   state = MarketCalendar.GetState(nowTaipei)            # §7.5
   若 state 改變 → 推播 MarketStatus
-  若 state != Open → 結束本輪
+  若 state != Open → 只補抓「快取裡還沒有價格」的標的(v1.3,見下方說明),然後結束本輪
   active = SignalR 連線數(不含已 Pause 的連線)
   若 active == 0 且 距上次抓取 < Quote:IdleIntervalSeconds → 結束本輪
   若處於失敗退避期 → 結束本輪
@@ -500,6 +500,7 @@ ex_ch = 以 | 連接,每檔為  tse_{Symbol}.tw(上市,Market = 1)  或  otc_{Sy
 - 網站啟動時先從 `Quotes` 載入記憶體快取(`ConcurrentDictionary<string, QuoteInput>`),讓第一個畫面立即有價。
 - 套用報價:同一個動作內更新記憶體快取並 upsert `Quotes`。
 - 新增持股成功後呼叫 `RequestImmediateFetch(symbol)`,下一個週期優先抓該代號,不等無連線的 5 分鐘間隔。
+- **非開盤時段的補抓(v1.3)**:`state != Open` 時,只抓「記憶體快取還沒有價格」的標的(例如收盤後才新增的持股;實測 MIS 收盤後仍回傳收盤價),已有價格者不抓。沒有優先請求時,補抓最多每 `Quote:IdleIntervalSeconds` 一次(避免抓不到價的標的整晚重試);新增持股的 `RequestImmediateFetch` 不受此節流限制。沿用同一個速率限制器與失敗退避。
 - 失敗退避:連續失敗 3 次後,間隔依序拉長為 15、30、60 秒(之後維持 60 秒);成功一次即恢復正常間隔。
 - 抓取失敗不得讓任何 API 失敗;一律回傳快取中的舊價。
 - 不重複代號超過 `BatchSize × MaxRequestsPer5s` 時,一輪抓取會超過 5 秒,畫面由延遲偵測反映;v1 不做優先順序。
