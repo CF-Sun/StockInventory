@@ -79,7 +79,13 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        try { await LoadCacheAsync(ct); }
+        _log.LogInformation("報價抓取服務啟動(每 {Active} 秒喚醒;批次 {Batch} 檔;開盤 {Open}~{Close})",
+            _q.ActiveIntervalSeconds, _q.BatchSize, _m.OpenTime, _m.CloseTime);
+        try
+        {
+            await LoadCacheAsync(ct);
+            _log.LogInformation("已從資料庫載入 {Count} 檔報價到快取", _cache.Snapshot().Count);
+        }
         catch (Exception ex) { _log.LogWarning("啟動載入報價快取失敗 ({Type})", ex.GetType().Name); }
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(_q.ActiveIntervalSeconds), _clock);
@@ -106,6 +112,8 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
         bool changed;
         lock (_lock)
         {
+            if (_state != state && _hasPushedStatus) _log.LogInformation("市場狀態改變:{From} → {To}", _state, state);
+            if (!_hasPushedStatus) _log.LogInformation("目前市場狀態:{State}(台北時間 {Local:yyyy-MM-dd HH:mm:ss})", state, local);
             _state = state;
             snap = Snapshot(nowUtc);
             changed = !_hasPushedStatus || _lastPushed != (snap.State, snap.Stale);
@@ -182,6 +190,8 @@ public sealed class QuoteFetcher : BackgroundService, IMarketStatusSource, IFetc
 
         if (anySuccess)
         {
+            if (_failures > 0 || _lastSuccessUtc is null || onlyMissing)
+                _log.LogInformation("報價抓取成功({Mode},{Count} 檔,快取共 {Cached} 檔)", onlyMissing ? "補抓缺價" : "盤中", symbols.Count, _cache.Snapshot().Count);
             lock (_lock) { _lastSuccessUtc = _clock.GetUtcNow().UtcDateTime; _failures = 0; _retryAtUtc = DateTime.MinValue; }
             foreach (var s in _subs) await Safe(() => s.OnQuotesAppliedAsync(ct));
         }

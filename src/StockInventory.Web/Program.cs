@@ -18,6 +18,8 @@ var logDir = builder.Configuration["Logging:Directory"] ?? Path.Combine(AppConte
 builder.Host.UseSerilog((_, lc) => lc
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning) // 不記錄每筆 SQL,避免洗掉重要訊息
+    .MinimumLevel.Override("System.Net.Http.HttpClient", Serilog.Events.LogEventLevel.Warning)
     .WriteTo.File(Path.Combine(logDir, "stockinventory-.log"),
         rollingInterval: RollingInterval.Day, retainedFileCountLimit: 30));
 
