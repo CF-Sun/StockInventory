@@ -14,6 +14,7 @@ public sealed class TestFactory(Dictionary<string, string?>? settings = null) : 
     protected override void ConfigureWebHost(IWebHostBuilder b)
     {
         b.UseSetting("Quote:Enabled", "false");
+        b.UseSetting("Sync:Enabled", "false");
         b.UseSetting("Logging:Directory", Path.Combine(Path.GetTempPath(), "si-test-logs"));
         foreach (var kv in settings ?? []) b.UseSetting(kv.Key, kv.Value);
         b.ConfigureServices(sv =>

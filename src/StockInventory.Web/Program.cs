@@ -70,6 +70,16 @@ else
     builder.Services.AddSingleton<IFetchRequester, NullFetchRequester>();
 }
 builder.Services.AddSignalR();
+if (cfg.GetValue("Sync:Enabled", true))
+{
+    // 標的主檔與休市日同步(§7.7)
+    builder.Services.AddHttpClient<IReferenceDataSource, HttpReferenceDataSource>(c =>
+    {
+        c.Timeout = TimeSpan.FromMinutes(2); // 上市 ISIN 清單約 9 MB
+        c.DefaultRequestHeaders.UserAgent.ParseAdd("StockInventory/1.0");
+    });
+    builder.Services.AddHostedService<ReferenceDataSync>();
+}
 builder.Services.AddScoped<StockInventory.Web.Services.ViewService>();
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);

@@ -38,7 +38,8 @@ public static class MisParser
 
     private static ParsedQuote ParseOne(string symbol, JsonElement e)
     {
-        var z = Num(Str(e, "z"));
+        // z 在沒有當下成交時常為 "-"(實測:盤中 0050、2330 的 z 都是 "-"),此時改用回應中 trade 物件的最近成交價 trade.z(實測存在)
+        var z = Num(Str(e, "z")) ?? (e.TryGetProperty("trade", out var tr) && tr.ValueKind == JsonValueKind.Object ? Num(Str(tr, "z")) : null);
         var ask = Num(FirstLevel(Str(e, "a")));
         var bid = Num(FirstLevel(Str(e, "b")));
         var y = Num(Str(e, "y"));
