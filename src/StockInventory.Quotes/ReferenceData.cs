@@ -12,7 +12,8 @@ public sealed record InstrumentInfo(string Symbol, string Name, Market Market, I
 /// <summary>
 /// 證交所 ISIN 公告頁(C_public.jsp)解析。2026-10-06 實測:欄位為「代號及名稱(以全形空白分隔)| ISIN | 上市日 | 市場別 | 產業別 | CFICode | 備註」,
 /// 並以只有一個儲存格的列標示區段(股票、ETF、認購(售)權證…)。
-/// 分辨方式(依 CFICode):ESVUFR = 股票(含創新板);CE 開頭 = ETF。特別股、ETN、DR、受益證券、權證一律不納入(SPEC 只要求股票與 ETF)。
+/// 分辨方式(依 CFICode):ESVUFR = 股票(含創新板);EP 開頭 = 特別股(視為股票,證交稅率相同、MIS 報價方式相同);CE 開頭 = ETF。
+/// ETN、DR、受益證券(REIT、資產基礎證券)、權證不納入:稅率或交易方式與 SPEC 的股票/ETF 假設不同。
 /// </summary>
 public static class IsinParser
 {
@@ -32,7 +33,7 @@ public static class IsinParser
 
             var cfi = cells[5];
             InstrumentKind kind;
-            if (cfi == "ESVUFR") kind = InstrumentKind.Stock;
+            if (cfi == "ESVUFR" || cfi.StartsWith("EP", StringComparison.Ordinal)) kind = InstrumentKind.Stock;
             else if (cfi.StartsWith("CE", StringComparison.Ordinal)) kind = InstrumentKind.Etf;
             else continue;
 

@@ -105,3 +105,15 @@ public class MisParserRealSampleTests // 真實樣本:2026-10-06 盤中由使用
         Assert.Equal((10.05m, StockInventory.Core.PriceSource.MidQuote), (q.LastPrice, q.Source));
     }
 }
+
+public class MisParserAfterCloseTests // 真實樣本:2026-10-06 13:46 收盤後實測
+{
+    [Fact] // 收盤後 z 與 trade.z 都是收盤價(13:30:00),仍為成交價;tlong 停在 13:30:00
+    public void RealAfterClose_ZIsClosingPrice_Trade()
+    {
+        var body = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Samples", "real_tse_etf_after_close.json"));
+        var q = MisParser.Parse(body).Single();
+        Assert.Equal((116.5m, StockInventory.Core.PriceSource.Trade, 115.95m), (q.LastPrice, q.Source, q.PrevClose));
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1791264600000).UtcDateTime, q.QuoteTimeUtc); // 13:30:00 台北時間
+    }
+}

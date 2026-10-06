@@ -24,6 +24,7 @@ public class ReferenceDataTests
         + Row("1101" + FW + "台泥", "TW0001101004", "ESVUFR", industry: "水泥工業")
         + Section("ETF") + Row("0050" + FW + "元大台灣50", "TW0000050004", "CEOGEU") + Row("00878" + FW + "國泰永續高股息", "TW0000087808", "CEOJEU")
         + Section("特別股") + Row("1101B" + FW + "台泥乙特", "TW0001101B09", "EPNRAR")
+        + Section("受益證券-不動產投資信託") + Row("01001T" + FW + "土銀富邦R1", "TW00001001T8", "CBCIXU")
         + Section("ETN") + Row("020000" + FW + "富邦特選蘋果N", "TW0000200001", "CMXXXU")
         + Section("上市認購(售)權證") + Row("030001" + FW + "友達台新6A購01", "TW0000300019", "RWSCCA")
         + "</table></html>";
@@ -35,11 +36,12 @@ public class ReferenceDataTests
     public void Isin_KeepsStocksAndEtfs_ByCfiCode_SplitsOnFullWidthSpace()
     {
         var r = IsinParser.Parse(ListedHtml(), Market.Twse);
-        Assert.Equal(new[] { "0050", "00878", "1101", "2330" }, r.Select(x => x.Symbol).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Equal(new[] { "0050", "00878", "1101", "1101B", "2330" }, r.Select(x => x.Symbol).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        Assert.Equal(InstrumentKind.Stock, r.Single(x => x.Symbol == "1101B").Kind);   // 特別股視為股票
         Assert.Equal((InstrumentKind.Etf, "元大台灣50"), (r.Single(x => x.Symbol == "0050").Kind, r.Single(x => x.Symbol == "0050").Name));
         Assert.Equal(InstrumentKind.Stock, r.Single(x => x.Symbol == "2330").Kind);
         Assert.All(r, x => Assert.Equal(Market.Twse, x.Market));
-        Assert.DoesNotContain(r, x => x.Symbol is "1101B" or "020000" or "030001"); // 特別股、ETN、權證不納入
+        Assert.DoesNotContain(r, x => x.Symbol is "020000" or "030001" or "01001T"); // ETN、權證、受益證券不納入
     }
 
     [Fact]
@@ -123,7 +125,7 @@ public class ReferenceDataTests
         var (sync, sp, src) = Make();
         Assert.True(await sync.SyncInstrumentsAsync(default));
         var first = await All(sp);
-        Assert.Equal(6, first.Count);
+        Assert.Equal(7, first.Count);
         Assert.All(first, i => Assert.True(i.IsActive));
         Assert.Equal(Market.Tpex, first.Single(i => i.Symbol == "6488").Market);
 
@@ -133,7 +135,7 @@ public class ReferenceDataTests
             + Row("0050" + FW + "元大台灣50", "TW0000050004", "CEOGEU") + Row("00878" + FW + "國泰永續高股息", "TW0000087808", "CEOJEU") + "</table></html>";
         Assert.True(await sync.SyncInstrumentsAsync(default));
         var second = await All(sp);
-        Assert.Equal(7, second.Count);                                           // 沒有刪除任何一筆
+        Assert.Equal(8, second.Count);                                           // 沒有刪除任何一筆
         Assert.False(second.Single(i => i.Symbol == "1101").IsActive);           // 不在名單 → 停用
         Assert.Equal("台積電(改)", second.Single(i => i.Symbol == "2330").Name);
         Assert.True(second.Single(i => i.Symbol == "2317").IsActive);
@@ -192,13 +194,13 @@ public class ReferenceDataTests
     {
         var (sync, sp, src) = Make();
         await sync.EnsureStartupDataAsync(default);
-        Assert.Equal(6, (await All(sp)).Count);
+        Assert.Equal(7, (await All(sp)).Count);
         using (var s = sp.CreateScope())
             Assert.Equal(18, await s.ServiceProvider.GetRequiredService<AppDbContext>().MarketHolidays.CountAsync());
 
         src.Listed = "壞掉"; src.Holidays = "壞掉";
         await sync.EnsureStartupDataAsync(default);                              // 都已有資料 → 不會去抓,也就不會失敗
-        Assert.Equal(6, (await All(sp)).Count);
+        Assert.Equal(7, (await All(sp)).Count);
     }
 }
 
