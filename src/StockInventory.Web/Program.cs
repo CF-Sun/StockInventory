@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics;
 using StockInventory.Web.Api;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -30,6 +32,10 @@ builder.Services.Configure<AlertOptions>(cfg.GetSection("Alert"));
 builder.Services.Configure<SeedOptions>(cfg.GetSection("Seed"));
 builder.Services.Configure<LoggingDirOptions>(cfg.GetSection("Logging"));
 builder.Services.Configure<DataProtectionDirOptions>(cfg.GetSection("DataProtection"));
+
+// SEC-15:Data Protection 金鑰存在站台資料夾以外的固定路徑,重新發佈後 Cookie 與記住裝置仍有效
+var dp = builder.Services.AddDataProtection().SetApplicationName("StockInventory");
+if (cfg["DataProtection:KeyDirectory"] is { Length: > 0 } keyDir) dp.PersistKeysToFileSystem(new DirectoryInfo(keyDir));
 
 // 連線字串只從環境變數/部署設定來,不放進 appsettings.json;缺少時 /health 會回報 db 失敗,不讓網站啟動失敗
 builder.Services.AddDbContext<AppDbContext>(o =>
@@ -72,7 +78,7 @@ builder.Services.AddRazorPages(o =>
 {
     o.Conventions.AuthorizeFolder("/");
     o.Conventions.AuthorizeFolder("/Admin", "AdminOnly");
-    foreach (var page in new[] { "/Account/Login", "/Account/LoginWith2fa", "/Account/LoginWithRecoveryCode", "/Account/Logout" })
+    foreach (var page in new[] { "/Error", "/Account/Login", "/Account/LoginWith2fa", "/Account/LoginWithRecoveryCode", "/Account/Logout" })
         o.Conventions.AllowAnonymousToPage(page);
 });
 builder.Services.AddAntiforgery(o => { o.HeaderName = "X-CSRF-TOKEN"; o.Cookie.Name = "si.csrf"; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; });
@@ -83,7 +89,13 @@ builder.Services.AddHostedService<SampleInstrumentSeeder>();
 var app = builder.Build();
 
 app.UseForwardedHeaders();
-if (!app.Environment.IsDevelopment()) app.UseHsts();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler(new ExceptionHandlerOptions { ExceptionHandler = ErrorHandling.HandleAsync }); // SEC-14
+    app.UseHsts();
+}
+if (app.Environment.IsProduction() && string.IsNullOrWhiteSpace(cfg["DataProtection:KeyDirectory"]))
+    app.Logger.LogWarning("正式環境未設定 DataProtection:KeyDirectory,重新發佈後登入 Cookie 將失效");
 app.UseSecurityHeaders();
 app.UseAuthentication();
 app.UseApiCsrf(); // 必須在 UseAuthentication 之後,權杖才會綁定正確的使用者
