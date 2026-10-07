@@ -1,6 +1,6 @@
 # 股票即時庫存管理平台 — 開發規格(AI 實作版)
 
-- 版本:v1.3,日期 2026-10-06(v1.1:§7.4 `market.stale` 門檻修正;v1.2:依實測更新 §7.1、§7.2、§7.7、§16.1、§16.2;v1.3:§7.3 非開盤時段補抓缺價標的)
+- 版本:v1.4,日期 2026-10-07(v1.1:§7.4 `market.stale` 門檻修正;v1.2:依實測更新 §7.1、§7.2、§7.7、§16.1、§16.2;v1.3:§7.3 非開盤時段補抓缺價標的;v1.4:新增 FR-25 截圖辨識新增持股、API-13、API-14、SEC-18 至 SEC-24、階段 P2b,細節見 `docs/sa/FR-25-截圖辨識新增持股.md`(§17))
 - 對應的人類閱讀版:線上文件「股票即時庫存管理平台 開發規格書」(內容一致,本檔為可直接實作的精簡、結構化版本)
 - 放置方式:放在專案根目錄;若使用 Claude Code,在 `CLAUDE.md` 加一行「規格見 SPEC.md,依 §14 階段逐步實作」;若使用其他工具(例如 `AGENTS.md`)同理。
 
@@ -67,14 +67,16 @@
 | FR-44 | 報價異常提示 | 交易時段內超過 3 分鐘未更新,頂端顯示黃色提示;缺價檔數註明在合計列 |
 | FR-45 | 即時更新 | SignalR 推播;頁面在背景或鎖屏時暫停,回到前景立即補一次 |
 | FR-50 | CSV 匯出 | 匯出目前檢視;UTF-8 含 BOM;不提供匯入 |
+| FR-25 | 截圖辨識新增持股 | 在 /Portfolios 上傳券商庫存截圖,只辨識股票代號、股數、總成本;辨識結果須經使用者核對後才寫入;圖片不保存;每次上傳前須勾選同意送第三方 AI 服務;同庫存已存在的標的預設略過。細節見 §17 |
 
 ### 2.2 非目標(不要做)
 
 - 興櫃、海外標的、期貨選擇權、融資融券、權證。
 - 交易流水、已實現損益、配息、歷史績效、K 線圖、五檔明細。
-- 庫存封存功能、持股備註欄、CSV 匯入、LINE 或 Telegram 通知、公開註冊、第三方登入。
+- 庫存封存功能、持股備註欄、CSV 匯入(截圖辨識為 FR-25,不是 CSV 匯入)、LINE 或 Telegram 通知、公開註冊、第三方登入。
 - 自動化瀏覽器測試。
 - 持股 `HoldingChanges` 的畫面。
+- 截圖辨識:不保存圖片、不自動寫入、不做多張合併、不做名稱比對、不做由均價推估成本、不支援 HEIC 與 PDF。
 
 ---
 
@@ -128,6 +130,13 @@ docs/
 | `Alert:LoginFailThreshold`、`Alert:LoginFailWindowMinutes` | 10、10 | 同一帳號或來源 IP 在視窗內失敗達門檻時寄信 |
 | `Logging:Directory` | — | 站台以外的日誌資料夾 |
 | `DataProtection:KeyDirectory` | — | 站台以外的金鑰資料夾 |
+| `Vision:ApiKey` **(env)** | — | 視覺辨識 API 金鑰(FR-25),只能放環境變數;未設定時功能停用 |
+| `Vision:Endpoint` | `https://api.anthropic.com/v1/messages` | 視覺 API 端點 |
+| `Vision:Model` | `claude-sonnet-5-5` | 辨識使用的模型,`[VERIFY: Q-07]` 實測準確度後定案 |
+| `Vision:TimeoutSeconds` | 30 | 單次辨識呼叫逾時 |
+| `Vision:MaxImageBytes` | 5242880 | 上傳圖片大小上限 |
+| `Vision:MaxCallsPerUserPerHour` | 10 | 每位使用者每小時辨識次數 |
+| `Vision:MaxCallsPerDay` | 200 | 全站每日辨識次數 |
 
 ---
 
@@ -696,6 +705,13 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | 404 | `NOT_FOUND` | 資源不存在,或屬於其他使用者 |
 | 409 | `DUPLICATE` | 庫存名稱重複、同庫存同代號、帳號名稱重複 |
 | 422 | `LIMIT_EXCEEDED` | 超過庫存或持股數量上限 |
+| 400 | `CONSENT_REQUIRED` | 截圖辨識未勾選同意送第三方服務 |
+| 413 | `PAYLOAD_TOO_LARGE` | 截圖超過大小上限 |
+| 415 | `UNSUPPORTED_MEDIA` | 截圖不是允許的格式(JPG、PNG、WebP) |
+| 422 | `NOTHING_RECOGNIZED` | 圖片中找不到持股資料 |
+| 429 | `RATE_LIMITED` | 辨識超過速率或已有進行中的請求,附 `Retry-After` |
+| 502 | `UPSTREAM_ERROR` | 辨識服務失敗,或辨識功能尚未啟用(未設定金鑰,503) |
+| 504 | `UPSTREAM_TIMEOUT` | 辨識服務逾時 |
 | 500 | `INTERNAL_ERROR` | 未預期錯誤;細節只寫日誌,不回傳 |
 
 ---
@@ -713,7 +729,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | SEC-07 | 登入失敗訊息一律「帳號或密碼錯誤」,不透露帳號是否存在;`IsActive = 0` 的帳號同樣顯示此訊息 |
 | SEC-08 | 資料隔離:`UserId` 只取自登入身分;所有庫存與持股查詢都以 `UserId` 篩選(EF Core 全域查詢篩選,或統一的資料存取層),他人資源回 404 |
 | SEC-09 | CSRF:`POST`、`PUT`、`DELETE` 驗證 `X-CSRF-TOKEN` |
-| SEC-10 | XSS:Razor 預設編碼;Vue 不使用 `v-html`;CSP `default-src 'self'; frame-ancestors 'none'`,腳本與樣式都由本站提供 |
+| SEC-10 | XSS:Razor 預設編碼;Vue 不使用 `v-html`;CSP `default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'`(v1.4:為截圖預覽加入 `blob:`,不加 `data:` 與 `https:`),腳本與樣式都由本站提供 |
 | SEC-11 | 安全標頭:`X-Content-Type-Options: nosniff`、`Referrer-Policy: strict-origin-when-cross-origin`;HSTS `max-age=15552000`,**不加** `includeSubDomains` |
 | SEC-12 | Forwarded Headers:只信任 Cloudflare 的 IP 範圍(設定檔維護);來源 IP 取自 `CF-Connecting-IP`,用於登入防護與日誌 |
 | SEC-13 | 資料存取一律 EF Core 參數化,不拼接 SQL |
@@ -721,6 +737,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | SEC-15 | Data Protection 金鑰存在 `DataProtection:KeyDirectory`(站台資料夾以外的固定路徑),並納入備份 |
 | SEC-16 | 網站的 SQL 登入只有 `StockInventory` 的資料讀寫權限,沒有結構變更權限;Migrations 由人工以另一個有權限的帳號執行,網站啟動時**不得**自動執行 Migrations |
 | SEC-17 | 日誌規則見 §0 第 7 點 |
+| SEC-18 至 SEC-24 | 截圖辨識的上傳驗證、不落地、日誌、金鑰、第三方同意、防濫用、防提示注入,見 §17 與 `docs/sa/FR-25-截圖辨識新增持股.md` §8 |
 
 ---
 
@@ -856,6 +873,16 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - [ ] T3.5 主畫面:庫存選擇列、網址參數、記住選擇、合計區、清單(卡片與表格)、合併列展開、顏色慣例(§12)
 - [ ] **閘門 G3**:UT-01 至 UT-07、IT-07、IT-08 通過
 
+### P2b 截圖辨識新增持股(FR-25,排在 P3 之後,不阻擋主線)
+
+- [ ] T2b.1 `IHoldingImageRecognizer` 與辨識結果正規化、狀態判定(Core 純函式)
+- [ ] T2b.2 視覺 API 用戶端(`Vision:*`)、速率限制(`AddRateLimiter`)
+- [ ] T2b.3 API-13 辨識(不寫 DB)
+- [ ] T2b.4 共用持股新增/更新領域服務、API-14 批次確認寫入
+- [ ] T2b.5 `/Portfolios` 截圖核對表前端
+- [ ] T2b.6 CSP 調整(`img-src 'self' blob:`)
+- [ ] **閘門 G2b**:UT-11、IT-09 至 IT-12 通過
+
 ### P4 報價服務
 
 - [ ] T4.1 實測 MIS(`[VERIFY: Q-01、Q-04]`),把真實回應存成樣本,寫 `docs/verify-notes.md`,必要時更新 §7.1
@@ -933,6 +960,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | Q-04 | 除權息當天 MIS 的昨收是否為調整後的值 | **已實測(2026-10-06,2614):是調整後的除權息參考價**,公式不改,見 §16.2 |
 | Q-05 | 現價與漲跌的顯示位數 | 目前為交易所原值、最多 2 位小數(§6.3);若使用者要求整數,只改 §6.3 |
 | Q-06 | 最低手續費與證交稅特例 | 由使用者確認後調整 `Fees:*` |
+| Q-07 | 視覺 API 模型選型與辨識準確度(FR-25) | T2b 以使用者提供、已去識別化的 10 至 20 張券商截圖實測,結果寫入 `docs/verify-notes.md`;門檻:代號 ≥ 98%、股數與總成本逐欄 ≥ 95% |
 
 ### 16.2 已知限制(不是缺陷,不要「修正」)
 
@@ -942,6 +970,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - 零股市值以整股報價估算。
 - 手續費最低值是假設,債券型 ETF 等特殊標的的證交稅可能不同;扣費預估僅供參考。
 - 持股為快照模式,成本與股數須人工維護;沒有已實現損益、配息、歷史績效。
+- 截圖辨識可能出錯,代號、股數、總成本與單位(股或張)須由使用者核對;辨識的圖片會傳送至第三方服務(Anthropic API),不在本站保存。
 - 除權息當天,MIS 的昨收 `y` 是除權息調整後的參考價(實測),所以漲跌、今日損益都以參考價為基準,與交易所顯示一致;配息造成的價格下跌不會算成今日虧損,配息後的成本需使用者自行調整。
 
 ### 16.3 手動驗收清單
@@ -954,3 +983,16 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - [ ] 重新發佈後,已登入的 Cookie 與記住裝置仍有效
 - [ ] 備份還原演練成功,還原後數字與還原前一致
 - [ ] 挑一檔實際持股,和券商 App 的現價、損益互相比對
+
+---
+
+## 17. 截圖辨識新增持股(FR-25,v1.4)
+
+完整的功能說明、API-13 與 API-14 的請求與回應、狀態值、驗證規則、前端文案、測試案例與給實作者的注意事項,見 **`docs/sa/FR-25-截圖辨識新增持股.md`**(SA 規格交付文件,2026-10-07 使用者確認)。該文件視為本規格的附錄;兩者衝突時依 §0 第 10 點停止該項實作並回報。
+
+摘要:
+- 辨識只輸出股票代號、股數(含單位)、總成本;只用代號對應 `Instruments`;不做名稱比對、不由均價推估成本。
+- 辨識端點(API-13)不寫資料庫;使用者核對後,由批次端點(API-14,單一交易)寫入,每筆各寫 `HoldingChanges` 的 `A` 或 `U`。
+- 同庫存已存在的標的預設略過,可逐列選「更新為辨識值」;不提供全部覆蓋或加總合併。
+- 圖片不保存、不落地磁碟、重新編碼去除 EXIF 後才送出;每次上傳前須勾選同意;日誌不記錄圖片、辨識結果、代號、股數、成本。
+- 資料庫:無異動。
