@@ -16,14 +16,23 @@ public sealed class ConnectionState(Guid userId)
 }
 
 /// <summary>§9:ConcurrentDictionary&lt;connectionId, { UserId, PortfolioIds?, Merge, Paused }&gt;;連線中斷時移除。</summary>
-public sealed class ConnectionRegistry : IActiveConnectionCounter
+public sealed class ConnectionRegistry(TimeProvider clock) : IActiveConnectionCounter
 {
+    /// <summary>備援輪詢(API-06)最近一次出現的時間在這個視窗內,也算「有人在看」。</summary>
+    public static readonly TimeSpan PollingWindow = TimeSpan.FromSeconds(15);
+
     private readonly ConcurrentDictionary<string, ConnectionState> _map = new();
+    private long _lastPollTicks;
+
+    /// <summary>頁面連不上 SignalR 時會每 5 秒輪詢 API-06;沒有這個登記,抓價服務會以為沒人看而退化成每 5 分鐘抓一次。</summary>
+    public void TouchPolling() => Interlocked.Exchange(ref _lastPollTicks, clock.GetUtcNow().UtcTicks);
     public void Add(string id, Guid userId) => _map[id] = new ConnectionState(userId);
     public void Remove(string id) => _map.TryRemove(id, out _);
     public ConnectionState? Get(string id) => _map.GetValueOrDefault(id);
     public IReadOnlyList<KeyValuePair<string, ConnectionState>> All() => _map.ToList();
-    public int ActiveCount => _map.Values.Count(c => !c.Paused); // 已 Pause 的不計入「有連線」
+    public int ActiveCount =>
+        _map.Values.Count(c => !c.Paused) // 已 Pause 的不計入「有連線」
+        + (clock.GetUtcNow().UtcTicks - Interlocked.Read(ref _lastPollTicks) <= PollingWindow.Ticks && Interlocked.Read(ref _lastPollTicks) != 0 ? 1 : 0);
 }
 
 [Authorize]

@@ -8,6 +8,8 @@
   var bannerEl = document.getElementById('banner');
   var errorEl = document.getElementById('error');
   var exportEl = document.getElementById('export');
+  var connEl = document.getElementById('conn');
+  var mode = '連線中…'; // 即時連線 / 輪詢模式,顯示在頁面底部,方便判斷即時更新是否正常
 
   var portfolios = [];
   var settings = null;
@@ -121,8 +123,15 @@
   }
 
   // ---------- 畫面 ----------
+  function setMode(m) { mode = m; renderConn(); }
+  function renderConn() {
+    if (!connEl) return;
+    var q = view && view.market && view.market.lastFetchedAtUtc ? ' · 最近報價 ' + hhmmss(view.market.lastFetchedAtUtc) : '';
+    connEl.textContent = '更新方式:' + mode + q;
+  }
+
   function render() {
-    renderBanner(); renderSummary(); renderList();
+    renderBanner(); renderSummary(); renderList(); renderConn();
   }
 
   function renderBanner() {
@@ -286,6 +295,7 @@
 
   // 連線中斷期間,頁面可見時每 5 秒輪詢 API-06;連線恢復後停止
   function startPolling() {
+    setMode('輪詢模式(每 5 秒)');
     if (pollTimer) return;
     pollTimer = setInterval(function () { if (!document.hidden) loadView(); }, 5000);
   }
@@ -293,6 +303,7 @@
 
   async function attach() {
     stopPolling();
+    setMode('即時連線');
     await conn.invoke('SetView', selected, true);
     if (document.hidden) conn.invoke('Pause').catch(function () {});
   }

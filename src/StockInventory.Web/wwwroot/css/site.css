@@ -80,3 +80,4 @@ main.wide{max-width:1100px}
   .shot-row{grid-template-columns:130px 1.2fr 1fr 1fr .6fr 1.6fr auto;align-items:start}
   .shot-row .lbl{display:none}
 }
+.conn{font-size:.8rem;color:var(--flat)}
