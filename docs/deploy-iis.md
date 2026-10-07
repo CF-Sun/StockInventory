@@ -24,9 +24,10 @@
 | `Smtp__Host`、`Smtp__Port`、`Smtp__UserName`、`Smtp__From`、`Smtp__Password`、`Alert__To__0`、`Alert__To__1`… | 通知信;未設定時只記日誌、不寄信 |
 | `Logging__Directory` | 站台以外的日誌資料夾 |
 | `DataProtection__KeyDirectory` | 站台以外的金鑰資料夾。**必設**,否則重新發佈後登入 Cookie 與「記住裝置」會失效 |
+| `Vision__ApiKey` | FR-25 截圖辨識的 Anthropic API 金鑰(只放環境變數;請用有支出上限、可輪替的專用金鑰)。**未設定時此功能停用**(API-13 回 503),網站其餘功能不受影響。其他 `Vision__*`(`Endpoint`、`Model`、`TimeoutSeconds`、`MaxImageBytes`、`MaxCallsPerUserPerHour`、`MaxCallsPerDay`)非機敏,預設值見 `appsettings.json` |
 | `Cloudflare__ProxyCidrs__0`、`Cloudflare__ProxyCidrs__1`… | Cloudflare 的 IP 範圍(逐項設定,格式如 `203.0.113.0/24`)。**必設**,否則不信任轉送標頭,來源 IP 會是 Cloudflare 的 IP。範圍請從 https://www.cloudflare.com/ips-v4 與 https://www.cloudflare.com/ips-v6 取得並定期更新 |
 
-**不要**在正式環境設定 `Dev__*`。`Quote__Enabled` 預設為 true(使用真實報價服務)。
+**不要**在正式環境設定 `Dev__*` 與 `Vision__UseFake`(Production 環境會忽略 `Vision__UseFake`)。IIS 請求大小上限:截圖上傳端點最大約 5 MB,請確認站台 `requestFiltering/requestLimits/@maxAllowedContentLength` 不低於 5,308,416 位元組(預設 30,000,000 已足夠);出站 HTTPS 需可連 `api.anthropic.com`。`Quote__Enabled` 預設為 true(使用真實報價服務)。
 
 ## 發佈流程(不暫停網站)
 

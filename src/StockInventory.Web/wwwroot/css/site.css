@@ -60,3 +60,23 @@ main.wide{max-width:1100px}
 .linkbtn{width:auto;margin:0;padding:0 6px;background:none;color:var(--accent)}
 @media (min-width:768px){.tbl{display:table}.cards{display:none}}
 .navbtn{width:auto;margin:0;padding:6px 12px}
+
+/* ===== FR-25 截圖核對表 ===== */
+.shot{border-top:1px solid var(--border);margin-top:8px;padding-top:8px}
+.shot-panel{margin-top:8px}
+.shot-panel button{width:auto;margin:8px 8px 0 0;padding:8px 14px}
+.shot-panel button:disabled{opacity:.5;cursor:not-allowed}
+.shot-preview{display:block;max-width:100%;max-height:240px;margin-top:8px;border:1px solid var(--border);border-radius:6px}
+.shot-row{display:grid;grid-template-columns:1fr;gap:6px;padding:10px 0;border-top:1px solid var(--border)}
+.shot-row input[type=text]{width:100%;margin-top:0;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
+.shot-row .lbl{display:block;font-size:.8rem;color:var(--flat)}
+.shot-row .radio{display:inline-flex;gap:4px;align-items:center;margin:0 12px 0 0}
+.shot-head{display:none}
+.shot-row .warn{font-size:.85rem;color:var(--warn-fg);background:var(--warn-bg);border-radius:4px;padding:1px 6px;margin-top:4px}
+.shot-row .tag.st-ok{color:var(--ok)}
+.shot-row .tag.st-not_found,.shot-row .tag.st-inactive,.shot-row .tag.st-invalid,.shot-row .tag.st-duplicate_in_image{color:var(--err);font-weight:600}
+@media (min-width:640px){
+  .shot-head{display:grid;font-size:.85rem;color:var(--flat)}
+  .shot-row{grid-template-columns:130px 1.2fr 1fr 1fr .6fr 1.6fr auto;align-items:start}
+  .shot-row .lbl{display:none}
+}

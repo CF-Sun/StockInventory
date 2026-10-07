@@ -15,7 +15,7 @@ public static class SecurityMiddleware
             var h = ctx.Response.Headers;
             h["X-Content-Type-Options"] = "nosniff";
             h["Referrer-Policy"] = "strict-origin-when-cross-origin";
-            h["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'";
+            h["Content-Security-Policy"] = "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'";
             await next();
         });
 

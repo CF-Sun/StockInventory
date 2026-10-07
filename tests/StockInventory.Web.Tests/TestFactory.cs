@@ -7,7 +7,7 @@ using StockInventory.Data;
 namespace StockInventory.Web.Tests;
 
 /// <summary>以 InMemory 取代 SQL Server,供不需要關聯式行為的測試使用。</summary>
-public sealed class TestFactory(Dictionary<string, string?>? settings = null) : WebApplicationFactory<Program>
+public sealed class TestFactory(Dictionary<string, string?>? settings = null, Action<IServiceCollection>? configureServices = null) : WebApplicationFactory<Program>
 {
     readonly string _db = Guid.NewGuid().ToString();
 
@@ -23,6 +23,7 @@ public sealed class TestFactory(Dictionary<string, string?>? settings = null) : 
                                             || d.ServiceType == typeof(DbContextOptions)).ToList())
                 sv.Remove(d);
             sv.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(_db));
+            configureServices?.Invoke(sv);
         });
     }
 }

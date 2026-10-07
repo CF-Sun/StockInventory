@@ -63,6 +63,8 @@
 | --- | --- | --- |
 | Q-05 | 現價顯示位數 | 目前為交易所原值、最多 2 位小數 |
 | Q-06 | 最低手續費、證交稅特例 | 目前 `Fees:*` 預設值;債券型 ETF 證交稅特例未處理 |
+| Q-07 | 視覺 API 模型選型與準確度(FR-25) | **真實 API 呼叫從未實測**(開發沙盒沒有金鑰、連不到 `api.anthropic.com`)。需實測:(1) 請求格式被接受,特別是 `output_config.format`(`json_schema`)與 `output_config.effort`;(2) `claude-sonnet-5-5` 對 10 至 20 張去識別化券商截圖的代號、股數、總成本準確度(建議代號 ≥ 98%、股數與成本逐欄 ≥ 95%);(3) 回應 `content` 的區塊型態與 `stop_reason`;(4) 單次耗時是否在 `Vision:TimeoutSeconds`(30 秒)內;(5) 用量與費用 |
+| — | FR-25 部署參數 | IIS `maxAllowedContentLength` 須 ≥ `Vision:MaxImageBytes` + 64 KB(預設 5,242,880 + 65,536 = 5,308,416 位元組以上;站台預設 30,000,000 已足夠,若曾調低請確認);出站 HTTPS 須可連 `Vision:Endpoint`;全站每日額度以台北時間日界計算(UTC+8),重啟歸零 |
 | — | 開盤前(09:00 前)與當天完全沒有成交的標的 | 此時 `z`、`trade` 是什麼未實測;解析器依 `z` → `trade.z` → 買賣價中間價 → 昨收 的順序,應能處理。想補測可在 08:30 到 09:00 之間跑 `-Sections Q01` |
 
 ## 樣本說明

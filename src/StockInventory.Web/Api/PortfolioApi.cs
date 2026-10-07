@@ -6,6 +6,7 @@ using StockInventory.Quotes;
 using StockInventory.Web.Options;
 using StockInventory.Quotes;
 using StockInventory.Web.Security;
+using StockInventory.Web.Services;
 using static StockInventory.Web.Api.ApiResults;
 
 namespace StockInventory.Web.Api;
@@ -124,36 +125,20 @@ public static class PortfolioApi
         });
 
         g.MapPost("/portfolios/{id:int}/holdings", async (int id, HoldingCreateRequest r, AppDbContext db, ICurrentUser me,
-            HttpContext ctx, IOptions<LimitsOptions> limits, IFetchRequester fetch) =>
+            HttpContext ctx, HoldingService svc) =>
         {
             var uid = me.UserId;
             var p = await db.Portfolios.AsNoTracking().FirstOrDefaultAsync(x => x.PortfolioId == id && x.UserId == uid);
             if (p is null) return NotFound(ctx);
 
-            var symbol = Validation.NormalizeSymbol(r.Symbol);
-            var errors = new Dictionary<string, string[]>();
-            if (Validation.Symbol(symbol) is { } e1) errors["symbol"] = [e1];
-            if (Validation.TotalCost(r.TotalCost) is { } e2) errors["totalCost"] = [e2];
-            if (Validation.Shares(r.Shares) is { } e3) errors["shares"] = [e3];
-            if (errors.Count == 0 && !await db.Instruments.AnyAsync(i => i.Symbol == symbol && i.IsActive))
-                errors["symbol"] = ["找不到此標的"];
-            if (errors.Count > 0) return Invalid(ctx, errors);
-
-            if (await db.Holdings.AnyAsync(h => h.PortfolioId == id && h.Symbol == symbol))
-                return Problem(ctx, 409, "DUPLICATE", "此庫存已有相同標的");
-            if (await db.Holdings.CountAsync(h => h.PortfolioId == id) >= limits.Value.MaxHoldingsPerPortfolio)
-                return Problem(ctx, 422, "LIMIT_EXCEEDED", $"每個庫存最多 {limits.Value.MaxHoldingsPerPortfolio} 檔持股");
-
-            var now = DateTime.UtcNow;
-            var h = new Holding { PortfolioId = id, Symbol = symbol, TotalCost = (long)r.TotalCost!.Value,
-                Shares = (long)r.Shares!.Value, CreatedAtUtc = now, UpdatedAtUtc = now };
-            db.Holdings.Add(h);
-            db.HoldingChanges.Add(Change(uid, p, symbol, 'A', null, h, now));
-            try { await db.SaveChangesAsync(); }
-            catch (DbUpdateException) { return Problem(ctx, 409, "DUPLICATE", "此庫存已有相同標的"); }
-
-            fetch.RequestImmediateFetch(symbol);
-            return Results.Json(HoldingDto.From(h), statusCode: 201);
+            var res = await svc.ApplyAsync(uid, p, [new HoldingWriteInput(r.Symbol, r.Shares, r.TotalCost, ExistsMode.Reject)], indexedKeys: false);
+            return res.Status switch
+            {
+                HoldingApplyStatus.Invalid => Invalid(ctx, res.Errors),
+                HoldingApplyStatus.Duplicate => Problem(ctx, 409, "DUPLICATE", "此庫存已有相同標的"),
+                HoldingApplyStatus.LimitExceeded => Problem(ctx, 422, "LIMIT_EXCEEDED", $"每個庫存最多 {res.MaxHoldings} 檔持股"),
+                _ => Results.Json(HoldingDto.From(res.Created[0]), statusCode: 201),
+            };
         });
 
         g.MapPut("/holdings/{id:int}", async (int id, HoldingUpdateRequest r, AppDbContext db, ICurrentUser me, HttpContext ctx) =>
@@ -219,12 +204,8 @@ public static class PortfolioApi
     private static IQueryable<Holding> OwnedHolding(AppDbContext db, int id, Guid uid) =>
         db.Holdings.Where(h => h.HoldingId == id && h.Portfolio!.UserId == uid);
 
-    private static HoldingChange Change(Guid uid, Portfolio p, string symbol, char action, Holding? old, Holding? now, DateTime at) => new()
-    {
-        UserId = uid, PortfolioId = p.PortfolioId, PortfolioName = p.Name, Symbol = symbol, Action = action,
-        OldTotalCost = old?.TotalCost, OldShares = old?.Shares,
-        NewTotalCost = now?.TotalCost, NewShares = now?.Shares, ChangedAtUtc = at,
-    };
+    private static HoldingChange Change(Guid uid, Portfolio p, string symbol, char action, Holding? old, Holding? now, DateTime at) =>
+        HoldingService.NewChange(uid, p, symbol, action, old, now, at);
 }
 
 public sealed record HoldingListDto(int HoldingId, string Symbol, string Name, long TotalCost, long Shares);

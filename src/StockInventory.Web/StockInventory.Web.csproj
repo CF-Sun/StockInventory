@@ -9,7 +9,13 @@
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.*" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
+    <!-- FR-25 圖片解碼與重新編碼(MIT 授權)。Windows 的原生元件隨 SkiaSharp 一併提供;Linux 另需 NoDependencies 套件(僅在 Linux 建置時加入) -->
+    <PackageReference Include="SkiaSharp" Version="3.*" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.*" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.*" />
   </ItemGroup>
 
   <PropertyGroup>

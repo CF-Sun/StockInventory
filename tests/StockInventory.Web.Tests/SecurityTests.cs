@@ -63,7 +63,7 @@ public class SecurityTests
         var res = await f.CreateClient().GetAsync("/health");
         Assert.Equal("nosniff", res.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.Equal("strict-origin-when-cross-origin", res.Headers.GetValues("Referrer-Policy").Single());
-        Assert.Equal("default-src 'self'; frame-ancestors 'none'", res.Headers.GetValues("Content-Security-Policy").Single());
+        Assert.Equal("default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'", res.Headers.GetValues("Content-Security-Policy").Single());
     }
 
     [Fact]

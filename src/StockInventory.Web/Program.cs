@@ -32,6 +32,7 @@ builder.Services.Configure<AuthOptions>(cfg.GetSection("Auth"));
 builder.Services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));
 builder.Services.Configure<AlertOptions>(cfg.GetSection("Alert"));
 builder.Services.Configure<SeedOptions>(cfg.GetSection("Seed"));
+builder.Services.Configure<StockInventory.Web.Vision.VisionOptions>(cfg.GetSection("Vision")); // Vision:ApiKey 只來自環境變數 Vision__ApiKey
 builder.Services.Configure<LoggingDirOptions>(cfg.GetSection("Logging"));
 builder.Services.Configure<DataProtectionDirOptions>(cfg.GetSection("DataProtection"));
 
@@ -83,6 +84,18 @@ if (cfg.GetValue("Sync:Enabled", true))
     builder.Services.AddHostedService<ReferenceDataSync>();
 }
 builder.Services.AddScoped<StockInventory.Web.Services.ViewService>();
+builder.Services.AddScoped<StockInventory.Web.Services.HoldingService>();
+
+// FR-25 截圖辨識:未設定 Vision:ApiKey 時功能停用(API-13 回 503),不影響網站啟動
+if (cfg.GetValue<bool>("Vision:UseFake") && !builder.Environment.IsProduction())
+    builder.Services.AddSingleton<StockInventory.Web.Vision.IHoldingImageRecognizer, StockInventory.Web.Vision.FakeHoldingImageRecognizer>();
+else
+{
+    if (cfg.GetValue<bool>("Vision:UseFake")) Console.Error.WriteLine("正式環境忽略 Vision:UseFake");
+    builder.Services.AddHttpClient<StockInventory.Web.Vision.IHoldingImageRecognizer, StockInventory.Web.Vision.AnthropicHoldingRecognizer>(
+        (sp, c) => c.Timeout = TimeSpan.FromSeconds(Math.Max(1, cfg.GetValue("Vision:TimeoutSeconds", 30)) + 5));
+}
+StockInventory.Web.Vision.VisionRateLimiting.AddVisionRateLimiter(builder.Services, cfg);
 builder.Services.AddAppIdentity(cfg);
 builder.Services.AddCloudflareForwarding(cfg);
 builder.Services.AddAuthorization(o => o.AddPolicy("AdminOnly", p => p.RequireRole(Roles.Admin)));
@@ -112,6 +125,7 @@ app.UseSecurityHeaders();
 app.UseAuthentication();
 app.UseApiCsrf(); // 必須在 UseAuthentication 之後,權杖才會綁定正確的使用者
 app.UseAuthorization();
+app.UseRateLimiter(); // FR-25 SEC-23:只作用於標記為辨識的端點
 app.UseOnboardingGate();
 
 app.UseStaticFiles();
@@ -119,6 +133,7 @@ app.MapRazorPages();
 app.MapHub<StockInventory.Web.Hubs.ViewHub>("/hubs/view");
 app.MapAdminApi();
 app.MapPortfolioApi();
+app.MapHoldingImportApi();
 app.MapViewApi();
 app.MapSettingsApi();
 app.MapExportApi();
