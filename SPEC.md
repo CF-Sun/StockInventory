@@ -1,6 +1,6 @@
 # 股票即時庫存管理平台 — 開發規格(AI 實作版)
 
-- 版本:v1.4,日期 2026-10-07(v1.1:§7.4 `market.stale` 門檻修正;v1.2:依實測更新 §7.1、§7.2、§7.7、§16.1、§16.2;v1.3:§7.3 非開盤時段補抓缺價標的;v1.4:新增 FR-25 截圖辨識新增持股、API-13、API-14、SEC-18 至 SEC-24、階段 P2b,細節見 `docs/sa/FR-25-截圖辨識新增持股.md`(§17))
+- 版本:v1.5,日期 2026-10-08(v1.1:§7.4 `market.stale` 門檻修正;v1.2:依實測更新 §7.1、§7.2、§7.7、§16.1、§16.2;v1.3:§7.3 非開盤時段補抓缺價標的;v1.4:新增 FR-25 截圖辨識新增持股、API-13、API-14、SEC-18 至 SEC-24、階段 P2b,細節見 `docs/sa/FR-25-截圖辨識新增持股.md`(§17);v1.5:新增 FR-26 當日即時線圖、API-15、資料表 `QuoteIntraday`、設定鍵 `Quote:UnwatchedIntervalSeconds` 與 `Intraday:*`、階段 P4b、Q-08;**盤中沒人看時改為每 30 秒持續抓價並記錄**(取代 300 秒),§7.3 與 §7.4 stale 門檻同步修正;§0 第 5 點與 §12.5 新增「繪圖座標映射」例外;細節見 `docs/sa/FR-26-當日即時線圖.md`(§18))
 - 對應的人類閱讀版:線上文件「股票即時庫存管理平台 開發規格書」(內容一致,本檔為可直接實作的精簡、結構化版本)
 - 放置方式:放在專案根目錄;若使用 Claude Code,在 `CLAUDE.md` 加一行「規格見 SPEC.md,依 §14 階段逐步實作」;若使用其他工具(例如 `AGENTS.md`)同理。
 
@@ -12,7 +12,7 @@
 2. 依 §14 的階段 P0 → P5 逐階段實作。每階段完成後執行該階段列出的測試(閘門),全部通過才進下一階段。
 3. 標示 `[VERIFY]` 的項目依賴外部系統的實際行為,必須先實測,不得憑記憶或猜測實作。實測結果寫進 `docs/verify-notes.md`,並把樣本回應存到 `tests/StockInventory.Quotes.Tests/Samples/`。
 4. 不做規格外的功能(見 §2)。遇到規格沒寫的細節,選最簡單、且與本檔一致的做法,並在提交說明列出你的假設。
-5. 所有金額與價格一律用 `decimal`(T-SQL 用 `decimal`/`bigint`),禁止 `double`、`float`。**捨入在伺服器端完成**,API 與 CSV 回傳的就是顯示值,前端不做任何運算與捨入。
+5. 所有金額與價格一律用 `decimal`(T-SQL 用 `decimal`/`bigint`),禁止 `double`、`float`。**捨入在伺服器端完成**,API 與 CSV 回傳的就是顯示值,前端不做任何運算與捨入。**唯二例外**:(a)新增持股的均價預覽(§12.3);(b)v1.5:當日走勢圖的繪圖座標映射(把伺服器給的時間與價格線性對應到 SVG 座標,§12.6)。走勢圖上顯示的價格、最高、最低、趨勢方向、缺口與降採樣仍全部由伺服器提供,前端不得自行計算。
 6. 機敏資訊(連線字串、SMTP 密碼、初始管理員密碼)不得出現在原始碼、`appsettings.json`、日誌、前端;只從環境變數讀取。
 7. 日誌不得記錄密碼、TOTP、Cookie,也不得記錄持股的成本與股數。
 8. 目前使用者的 `UserId` 只能取自登入身分(Cookie),禁止信任任何請求參數、標頭或 body 內的使用者 Id。
@@ -68,11 +68,13 @@
 | FR-45 | 即時更新 | SignalR 推播;頁面在背景或鎖屏時暫停,回到前景立即補一次 |
 | FR-50 | CSV 匯出 | 匯出目前檢視;UTF-8 含 BOM;不提供匯入 |
 | FR-25 | 截圖辨識新增持股 | 在 /Portfolios 上傳券商庫存截圖,只辨識股票代號、股數、總成本;辨識結果須經使用者核對後才寫入;圖片不保存;每次上傳前須勾選同意送第三方 AI 服務;同庫存已存在的標的預設略過。細節見 §17 |
+| FR-26 | 當日即時線圖 | 持股清單每個代號顯示當日(盤中)走勢:每列迷你圖,點開展開大圖;盤中不論有沒有人看都持續抓價並每分鐘記錄(1 分鐘解析度,存 `QuoteIntraday`,保留 7 天);只記成交價(`PriceSource = 1`)且 09:00 至 13:30 的點,盤前、試撮價、昨收不畫(顯示「尚無成交」);盤後保留當日,休市日顯示最近交易日並標示日期;每代號一張圖,不畫成本線;只提供使用者持股內的代號,否則 404;失敗只影響圖區。細節見 §18 |
 
 ### 2.2 非目標(不要做)
 
 - 興櫃、海外標的、期貨選擇權、融資融券、權證。
 - 交易流水、已實現損益、配息、歷史績效、K 線圖、五檔明細。
+- 走勢圖邊界(FR-26):只做當日(或休市日的最近交易日)的 1 分鐘分時折線;不做 K 線、多日或歷史區間查詢、技術指標、縮放、成本線與買賣點、補抓歷史資料(即使 Q-08 發現 MIS 有歷史分時 API 也不納入 v1.5)、保留超過 7 天、前端自行運算(座標映射除外)。
 - 庫存封存功能、持股備註欄、CSV 匯入(截圖辨識為 FR-25,不是 CSV 匯入)、LINE 或 Telegram 通知、公開註冊、第三方登入。
 - 自動化瀏覽器測試。
 - 持股 `HoldingChanges` 的畫面。
@@ -115,7 +117,8 @@ docs/
 | `Quote:BatchSize` | 30 | 單次查詢代號數,`[VERIFY]` |
 | `Quote:MaxRequestsPer5s` | 3 | 所有批次共用的滑動視窗上限,`[VERIFY]` |
 | `Quote:ActiveIntervalSeconds` | 5 | 有連線時的抓取間隔 |
-| `Quote:IdleIntervalSeconds` | 300 | 無連線時的抓取間隔 |
+| `Quote:UnwatchedIntervalSeconds` | 30 | v1.5:盤中(`Open`)沒有連線時的抓取間隔,範圍 `ActiveIntervalSeconds` 至 300;超出範圍時啟動回報設定錯誤並使用預設 |
+| `Quote:IdleIntervalSeconds` | 300 | **只用於非開盤時段**補抓快取缺價標的的節流(v1.5 起不再用於盤中,也不參與 stale 門檻) |
 | `Quote:TimeoutSeconds` | 5 | 單次請求逾時 |
 | `Quote:StaleSeconds` | 180 | 判斷延遲的門檻 |
 | `Market:OpenTime`、`Market:CloseTime` | `08:30`、`14:35` | 抓取時段(含頭尾) |
@@ -137,6 +140,13 @@ docs/
 | `Vision:MaxImageBytes` | 5242880 | 上傳圖片大小上限 |
 | `Vision:MaxCallsPerUserPerHour` | 10 | 每位使用者每小時辨識次數 |
 | `Vision:MaxCallsPerDay` | 200 | 全站每日辨識次數 |
+| `Intraday:Enabled` | `true` | FR-26 總開關;`false` 時不記錄、API-15 回 503 `FEATURE_DISABLED`、前端不顯示圖區 |
+| `Intraday:RecordStartTime`、`Intraday:RecordEndTime` | `09:00`、`13:30` | 記錄時段(Taipei,含頭尾分鐘,上限 13:30:59) |
+| `Intraday:RetentionDays` | 7 | 保留天數 |
+| `Intraday:FlushSeconds` | 60 | 記憶體緩衝寫入資料庫的週期(對齊分鐘邊界) |
+| `Intraday:MaxPoints` | 90 | API-15 完整查詢降採樣的點數上限 |
+| `Intraday:GapBreakSeconds` | 180 | 相鄰兩點間隔超過此值,後一點標 `gap = true` |
+| `Intraday:MaxRequestsPerMinute` | 30 | API-15 每位使用者每分鐘請求上限 |
 
 ---
 
@@ -242,6 +252,16 @@ CREATE TABLE dbo.Quotes (
   CONSTRAINT FK_Quotes_Instruments FOREIGN KEY (Symbol) REFERENCES dbo.Instruments (Symbol)
 );
 
+CREATE TABLE dbo.QuoteIntraday (   -- v1.5(FR-26)當日分時走勢,1 分鐘解析度;只存公開報價,不含使用者資料
+  Symbol    varchar(10)   NOT NULL,
+  BucketUtc datetime2(0)  NOT NULL,   -- 觀測時間(本系統抓到該價的時間 FetchedAtUtc)截到分鐘,UTC,秒為 0;不用 tlong
+  TradeDate date          NOT NULL,   -- BucketUtc 換算 Taipei 時間的日期
+  Price     decimal(12,4) NOT NULL CONSTRAINT CK_QuoteIntraday_Price CHECK (Price > 0),  -- 該分鐘最後一筆成交價觀測值(PriceSource = 1)
+  CONSTRAINT PK_QuoteIntraday PRIMARY KEY (Symbol, BucketUtc),
+  CONSTRAINT FK_QuoteIntraday_Instruments FOREIGN KEY (Symbol) REFERENCES dbo.Instruments (Symbol)
+);
+CREATE INDEX IX_QuoteIntraday_TradeDate ON dbo.QuoteIntraday (TradeDate);   -- 保留期清理用
+
 CREATE TABLE dbo.MarketHolidays (   -- 證交所公告的休市日;週六日不存入
   HolidayDate date         NOT NULL CONSTRAINT PK_MarketHolidays PRIMARY KEY,
   Description nvarchar(50) NULL
@@ -258,6 +278,8 @@ CREATE TABLE dbo.MarketHolidays (   -- 證交所公告的休市日;週六日不�
 | 刪除庫存 | 同一交易內,庫存下每筆持股各寫一筆 `D`,再刪除庫存;並把該庫存 Id 從 `UserSettings.SelectedPortfolioIds` 移除,移除後若為空則設 NULL |
 | 庫存新增 | `SortOrder` = 該使用者目前最大值加 1 |
 | 標的主檔同步 | 以 `Symbol` upsert;不在最新名單者設 `IsActive = 0`,不刪除(已有持股的標的仍要能顯示) |
+| 走勢紀錄(v1.5) | 只記 `PriceSource = 1`、`MarketState = Open`、觀測時間 09:00:00 至 13:30:59(Taipei)、`QuoteTime` 的 Taipei 日期為今日的點;記憶體每代號只留當前分鐘最後一筆,每 `Intraday:FlushSeconds` 以 EF Core 邏輯 upsert(`Symbol`, `BucketUtc`);不寫補值列;flush 失敗保留佇列重試,不得影響報價流程。細節見 §18 |
+| 走勢清理(v1.5) | 每日 07:00 定期工作之後刪除 `TradeDate` 早於今日(Taipei)減 `Intraday:RetentionDays` 天的列,`DELETE TOP (5000)` 分批迴圈;失敗只記日誌 |
 
 ---
 
@@ -498,20 +520,23 @@ ex_ch = 以 | 連接,每檔為  tse_{Symbol}.tw(上市,Market = 1)  或  otc_{Sy
   若 state 改變 → 推播 MarketStatus
   若 state != Open → 只補抓「快取裡還沒有價格」的標的(v1.3,見下方說明),然後結束本輪
   active = SignalR 連線數(不含已 Pause 的連線)
-  若 active == 0 且 距上次抓取 < Quote:IdleIntervalSeconds → 結束本輪
+  interval = active > 0 ? Quote:ActiveIntervalSeconds : Quote:UnwatchedIntervalSeconds   # v1.5:盤中沒人看也持續抓(30 秒)
+  若 距上次抓取 < interval → 結束本輪
   若處於失敗退避期 → 結束本輪
   symbols = SELECT DISTINCT Symbol FROM Holdings     # 每輪重新查詢,資料量小
   依 Instruments.Market 組成 ex_ch,每 Quote:BatchSize 檔一批
   每一批:先通過速率限制器(滑動視窗,每 5 秒最多 Quote:MaxRequestsPer5s 次;超過就等到下一個視窗)
          請求(逾時 Quote:TimeoutSeconds)→ 解析 → 套用(§7.2)
   只要有任何一批成功 → lastSuccessAtUtc = now;對所有未 Pause 的連線重算並推播 ViewUpdated
+  每筆套用後呼叫 IntradayRecorder(§18),不論有沒有人看
   全部批次失敗 → 失敗次數 + 1,記錄日誌
 ```
 
 - 網站啟動時先從 `Quotes` 載入記憶體快取(`ConcurrentDictionary<string, QuoteInput>`),讓第一個畫面立即有價。
 - 套用報價:同一個動作內更新記憶體快取並 upsert `Quotes`。
-- 新增持股成功後呼叫 `RequestImmediateFetch(symbol)`,下一個週期優先抓該代號,不等無連線的 5 分鐘間隔。
-- **非開盤時段的補抓(v1.3)**:`state != Open` 時,只抓「記憶體快取還沒有價格」的標的(例如收盤後才新增的持股;實測 MIS 收盤後仍回傳收盤價),已有價格者不抓。沒有優先請求時,補抓最多每 `Quote:IdleIntervalSeconds` 一次(避免抓不到價的標的整晚重試);新增持股的 `RequestImmediateFetch` 不受此節流限制。沿用同一個速率限制器與失敗退避。
+- 新增持股成功後呼叫 `RequestImmediateFetch(symbol)`,下一個週期優先抓該代號,不等無連線時的間隔(盤中 30 秒、非開盤 300 秒)。
+- **非開盤時段的補抓(v1.3)**:`state != Open` 時,只抓「記憶體快取還沒有價格」的標的(例如收盤後才新增的持股;實測 MIS 收盤後仍回傳收盤價),已有價格者不抓。沒有優先請求時,補抓最多每 `Quote:IdleIntervalSeconds` 一次(避免抓不到價的標的整晚重試;`IdleIntervalSeconds` 自 v1.5 起只用於此處);新增持股的 `RequestImmediateFetch` 不受此節流限制。沿用同一個速率限制器與失敗退避。
+- **v1.5 盤中持續抓價的取捨**:`state == Open` 時沒有連線也每 `Quote:UnwatchedIntervalSeconds`(30 秒)抓一次,使走勢連續、不以直線連接缺口。MIS 請求量約為 v1.4 沒人看(300 秒)的 10 倍(例:60 檔 = 2 批,08:30 至 14:35 約 1,460 次/日,平均約 0.07 次/秒,約為有人看時的 1/6),遠低於 Q-01 實測可承受的頻率,但 MIS 無服務保證,長時間規律請求仍可能被限流或封鎖。緩解:沿用速率限制器與失敗退避;非 JSON、HTML 錯誤頁、非 2xx 一律視為失敗;發現封鎖跡象時調大 `Quote:UnwatchedIntervalSeconds`(上限 300)或設 `Intraday:Enabled=false`,不需改程式。
 - 失敗退避:連續失敗 3 次後,間隔依序拉長為 15、30、60 秒(之後維持 60 秒);成功一次即恢復正常間隔。
 - 抓取失敗不得讓任何 API 失敗;一律回傳快取中的舊價。
 - 不重複代號超過 `BatchSize × MaxRequestsPer5s` 時,一輪抓取會超過 5 秒,畫面由延遲偵測反映;v1 不做優先順序。
@@ -531,8 +556,8 @@ quoteStatus(quote, marketState, nowUtc):
 JSON 字串:`quoteStatus` 為 `live`、`delayed`、`reference`、`prevclose`、`missing`;`priceSource` 為 `trade`、`midquote`、`prevclose`。
 
 全域旗標:`market.stale = (state == Open) && (now - lastSuccessAtUtc) > 門檻`;`market.lastFetchedAtUtc = lastSuccessAtUtc`(從未成功抓取過時為 null,且此時 `stale` 為 false)。
-其中門檻:有連線(未 Pause 的 SignalR 連線數 > 0)時為 `Quote:StaleSeconds`;無連線時抓取間隔拉長為 `Quote:IdleIntervalSeconds`,所以門檻為 `Quote:IdleIntervalSeconds + Quote:StaleSeconds`(預設 480 秒),避免正常的閒置間隔被誤判為報價中斷。
-(v1.1 修正:原版固定用 `StaleSeconds`,與 §7.3 的閒置間隔矛盾。)
+其中門檻:有連線(未 Pause 的 SignalR 連線數 > 0)時為 `Quote:StaleSeconds`(預設 180 秒);無連線時盤中抓取間隔為 `Quote:UnwatchedIntervalSeconds`,所以門檻為 `Quote:UnwatchedIntervalSeconds + Quote:StaleSeconds`(預設 210 秒),避免正常的沒人看間隔被誤判為報價中斷。`market.stale` 只在 `state == Open` 時可能為真,而非開盤時段的 `Quote:IdleIntervalSeconds`(300 秒補抓節流)不參與此門檻。
+(v1.1 修正:原版固定用 `StaleSeconds`,與 §7.3 的閒置間隔矛盾。v1.5:盤中沒人看的間隔由 300 秒改為 30 秒,門檻由 `IdleIntervalSeconds + StaleSeconds`(480 秒)改為 `UnwatchedIntervalSeconds + StaleSeconds`(210 秒);單檔 `quoteStatus = delayed` 的規則不變。)
 
 ### 7.5 市場狀態
 
@@ -556,6 +581,7 @@ JSON 字串:`quoteStatus` 為 `live`、`delayed`、`reference`、`prevclose`、`
 | --- | --- | --- |
 | 標的主檔同步 | 每日 07:00(Taipei) | 取得上市、上櫃的股票與 ETF 名單,upsert `Instruments`;必須能分辨 `Kind`(ETF 或股票);不在名單者設 `IsActive = 0` |
 | 休市日同步 | 每年 1 月 1 日,以及啟動時若缺當年資料 | 寫入 `MarketHolidays`(週六日不存) |
+| 走勢清理(v1.5) | 每日 07:00(Taipei),在標的主檔同步之後 | 刪除超過 `Intraday:RetentionDays` 的 `QuoteIntraday` 列(見 §5.4) |
 
 實測決定的來源(2026-10-06,詳見 `docs/verify-notes.md`):
 - 標的主檔:證交所 ISIN 公告頁 `https://isin.twse.com.tw/isin/C_public.jsp?strMode=2`(上市)與 `strMode=4`(上櫃),編碼 Big5(ms950),上市頁約 9 MB。以 CFICode 分辨:`ESVUFR` = 股票(含創新板),`EP` 開頭 = 特別股(視為股票),`CE` 開頭 = ETF;ETN、DR、受益證券、權證不納入。
@@ -649,6 +675,16 @@ View 結構(API-06 回應,SignalR `ViewUpdated` 的內容也完全相同):
 | API-24 | `POST /api/admin/users/{id}/reset-2fa` | 重設驗證器金鑰、停用 TOTP、清除還原碼;回 `204` |
 | API-30 | `GET /health`(匿名) | `{ "status": "ok", "db": "ok", "quotes": { "state": "open", "stale": false, "lastFetchedAtUtc": "…" } }`;資料庫失敗,或 `state == open` 且 `stale == true`,回 503 並把 `status` 設為 `down`;其餘回 200。不得回傳任何使用者資料或例外細節 |
 
+### 8.5 當日走勢(FR-26,v1.5)
+
+| 編號 | 方法與路徑 | 說明 |
+| --- | --- | --- |
+| API-15 | `GET /api/intraday?symbols=&tradeDate=&sinceUtc=` | 需登入,不需 CSRF。`symbols`:逗號分隔 1 至 50 個代號(去空白、轉大寫、去重),**每個都必須是目前使用者持股內的代號,否則整個請求 404**;`tradeDate`(`yyyy-MM-dd`)與 `sinceUtc`(UTC ISO 8601)為增量查詢用,必須成對提供,否則 400。回應 `200` `{ "asOf", "series": [{ "symbol", "name", "status", "tradeDate", "isToday", "incremental", "axis", "prevClose", "high", "low", "yMin", "yMax", "trend", "points": [{ "t", "p", "gap" }] }] }`,欄位型別、降採樣(≤ `Intraday:MaxPoints`)、缺口、軸範圍、顯示日選擇與錯誤碼見 §18 與 `docs/sa/FR-26-當日即時線圖.md` §5、§6 |
+
+- `status` 為 `ok` 或 `noData`;`trend` 為 `up`、`down`、`flat` 或 null;`points` 依 `t` 升冪;價格為 `decimal(12,4)` 原值,不捨入。
+- 回應加 `Cache-Control: no-store`;日誌不記錄 `symbols`。
+- 每位使用者每分鐘最多 `Intraday:MaxRequestsPerMinute` 次,超過回 429 `RATE_LIMITED`。
+
 ---
 
 ## 9. SignalR 契約
@@ -714,6 +750,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | 429 | `RATE_LIMITED` | 辨識超過速率或已有進行中的請求,附 `Retry-After` |
 | 502 | `UPSTREAM_ERROR` | 辨識服務失敗,或辨識功能尚未啟用(未設定金鑰,503) |
 | 504 | `UPSTREAM_TIMEOUT` | 辨識服務逾時 |
+| 503 | `FEATURE_DISABLED` | 走勢功能已關閉(`Intraday:Enabled = false`,API-15) |
 | 500 | `INTERNAL_ERROR` | 未預期錯誤;細節只寫日誌,不回傳 |
 
 ---
@@ -777,11 +814,12 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | 合併列 | `sources` 非空時列尾有「▸」,點開顯示各庫存的股數與總成本;庫存名稱由 API-01 的結果對照 |
 | 手機卡片 | 預設顯示:代號與名稱、現價、漲跌幅、股數、均價、未實現損益加報酬率、今日損益;點開卡片顯示總成本與市值;`estFee` 非 null 時一併顯示預估手續費與證交稅 |
 | 桌機表格 | 顯示所有欄位;`DeductFees` 關閉時不顯示 `estFee`、`estTax` 欄 |
-| 新增持股 | 桌機為對話框、手機為底部面板:搜尋標的(API-10)→ 輸入總成本與股數 → 即時顯示「均價 = {總成本 ÷ 股數,小數 2 位}」(這是唯一允許前端計算的地方,僅為預覽,最終以伺服器為準)→ 儲存 |
+| 新增持股 | 桌機為對話框、手機為底部面板:搜尋標的(API-10)→ 輸入總成本與股數 → 即時顯示「均價 = {總成本 ÷ 股數,小數 2 位}」(這是除 §12.6 走勢圖座標映射之外,唯一允許前端計算的地方,僅為預覽,最終以伺服器為準)→ 儲存 |
 | 編輯持股 | 只能改總成本與股數 |
 | 刪除 | 一律二次確認(文案見 §12.5) |
 | 空狀態 | 沒有任何庫存:引導「建立第一個庫存」;庫存內沒有持股:引導「新增持股」 |
 | 數字顏色 | 依 `colorScheme`:0 為紅漲綠跌、1 為綠漲紅跌;零與 null 用中性色;使用 CSS 變數與 class(`.pnl-up`、`.pnl-down`、`.pnl-flat`),並跟隨系統淺色與深色模式 |
+| 走勢圖(v1.5) | 持股清單每列有迷你圖,點開展開大圖;規則見 §12.6 |
 | 報價狀態標籤 | `reference` 標「參考價」、`prevclose` 標「昨收」、`delayed` 標灰色「延遲」、`missing` 的數字欄顯示「—」 |
 
 ### 12.4 即時更新(前端)
@@ -793,7 +831,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 
 ### 12.5 顯示格式與文案
 
-- 數字:千分位逗號;正數前加「+」、負數前加「−」(U+2212)、零不加符號;報酬率與漲跌幅後加「%」;均價固定 2 位小數;null 顯示「—」。前端只做格式化,不運算。
+- 數字:千分位逗號;正數前加「+」、負數前加「−」(U+2212)、零不加符號;報酬率與漲跌幅後加「%」;均價固定 2 位小數;null 顯示「—」。前端只做格式化,不運算(例外:§0 第 5 點所列的均價預覽與走勢圖座標映射)。
 - 繁體中文文案:
 
 | 用途 | 文案 |
@@ -807,7 +845,22 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | 刪除持股確認 | `刪除 {symbol} {name}?刪除後無法復原。` |
 | 均價預覽 | `均價 = {avg}` |
 | 載入失敗 | `載入失敗,請重試` |
+| 走勢標題(v1.5) | `當日走勢`(休市日為 `{MM/dd} 走勢`) |
+| 走勢無資料 | `尚無成交` |
+| 走勢載入失敗 | `走勢載入失敗`(附「重試」) |
+| 走勢展開、收合 | `展開走勢圖`、`收合走勢圖` |
+| 走勢大圖標示 | `昨收`、`最高`、`最低` |
 | 登入失敗 | `帳號或密碼錯誤` |
+
+### 12.6 當日走勢圖(FR-26,v1.5)
+
+資料來源 API-15(§8.5);完整規則見 `docs/sa/FR-26-當日即時線圖.md` §7。
+
+- 桌機表格新增「走勢」欄;手機卡片在代號列右側顯示迷你圖(約 96×32 px,只畫折線)。點迷你圖或「展開走勢圖」在該列下方展開大圖,再點收合;與合併列的「▸」庫存明細互不干擾。每個代號只有一張圖(合併列也是),不畫成本線與買賣點。
+- **自繪 SVG**(`<path>`),不引入圖表函式庫;不使用 `v-html`、不使用 inline `style` 屬性(CSP);顏色以 `.pnl-up`、`.pnl-down`、`.pnl-flat` 依伺服器回傳的 `trend` 套用,並遵守 `colorScheme`;SVG 加 `role="img"` 與 `aria-label`。
+- **座標映射(唯一允許的前端運算)**:`x = (t − axis.openUtc) / (axis.closeUtc − axis.openUtc) × 寬`,`y = (yMax − p) / (yMax − yMin) × 高`。最高、最低、趨勢、降採樣、缺口(`gap`)都用伺服器的值;`gap = true` 的點開新線段(`M`),不與前一點連線。互動只顯示最接近的既有點的時間(Taipei `HH:mm`)與價格,不內插、不算漲跌。
+- 載入與更新:API-06 畫完後依目前清單代號每 50 個一批呼叫 API-15;之後每 60 秒增量輪詢(帶 `tradeDate`、`sinceUtc`);`Pause()` 時暫停、`Resume()` 時立即補一次;清單新增或刪除代號時重新完整查詢。收到 `ViewUpdated` 時,若 `market.state = open` 且該列 `priceSource = trade`、`quoteStatus = live`,把 (`asOf`, `lastPrice`) 當暫時線尾點延伸(不寫入、不送出);價格超出 `yMin` 至 `yMax` 時立即重取(最多每 15 秒一次)。
+- 狀態:`status = noData` 顯示「尚無成交」(迷你圖位置顯示「—」);`isToday = false` 標示日期;API-15 失敗(503 `FEATURE_DISABLED` 除外)只在圖區顯示「走勢載入失敗」與「重試」,不影響報價、損益、合計與 SignalR;503 `FEATURE_DISABLED` 隱藏整個走勢欄;404(清單剛刪除標的的競態)靜默重取後重試一次。
 
 ---
 
@@ -832,6 +885,12 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 3. 有結構變更時產生並以具結構變更權限的帳號執行遷移腳本(`dotnet ef migrations script --idempotent`)。
 4. 把輸出資料夾內容複製到站台目錄(若 DLL 被鎖定而失敗,先回收應用程式集區再複製)。
 5. 驗證:`/health` 回 200、能登入、主畫面數字與 §6.4 的 TV-01 一致。
+
+FR-26(v1.5)的結構變更:新增資料表 `dbo.QuoteIntraday`(§5.3)。
+- **Migration(`AddQuoteIntraday`)須人工執行**:網站使用的 SQL 登入**沒有 DDL 權限**,網站啟動時**不得**自動執行 Migrations(SEC-16);由具結構變更權限的帳號執行 `dotnet ef migrations script --idempotent` 產生的腳本。
+- 順序:備份 → 執行腳本並確認資料表存在 → 部署新版程式。若程式先上線,紀錄器 flush 失敗只記警告、API-15 回 500,其他功能不受影響,補跑腳本後自動恢復。
+- 權限:網站 SQL 登入需對 `dbo.QuoteIntraday` 有 `SELECT, INSERT, UPDATE, DELETE`(`db_datareader` 加 `db_datawriter` 成員自動涵蓋,否則由有權限帳號 `GRANT`)。
+- 回滾:程式可直接回滾,不需刪表;緊急關閉用 `Intraday:Enabled=false`。
 
 ---
 
@@ -895,6 +954,17 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - [ ] T4.6 報價狀態與延遲偵測、Email 通知(§7.4、§7.6)、`/health` 的報價欄位
 - [ ] **閘門 G4**:UT-08、UT-09、解析測試通過;盤中實測約每 5 秒更新
 
+### P4b 當日即時線圖(FR-26,排在 P4 之後,不阻擋主線)
+
+- [ ] T4b.1 `StockInventory.Core`:`ShouldRecord`、降採樣、`yMin/yMax/trend`、顯示日選擇純函式
+- [ ] T4b.2 實體、DbContext 對應、Migration `AddQuoteIntraday`(只產生腳本,**人工執行**,見 §13);`Quote:UnwatchedIntervalSeconds`、`Intraday:*` 設定綁定與驗證
+- [ ] T4b.3 抓價排程改為 §7.3(盤中沒人看 30 秒),`market.stale` 門檻改為 §7.4 新定義(同步修改 `QuoteFetcher.Snapshot` 與其測試)
+- [ ] T4b.4 `IntradayRecorder`、flush、保留清理
+- [ ] T4b.5 API-15 與速率限制
+- [ ] T4b.6 前端走勢圖(§12.6)
+- [ ] T4b.7 `[VERIFY: Q-08]` 使用者盤中實測 MIS 歷史分時 API,不阻擋
+- [ ] **閘門 G4b**:UT-09(修改後)、UT-12 至 UT-15、QT-01 至 QT-03、IT-13 至 IT-17 通過
+
 ### P5 上線
 
 - [ ] T5.1 手機驗收與 §16.3 的手動驗收清單
@@ -917,8 +987,12 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | UT-06 | 缺價與缺昨收 | TV-07、TV-08、TV-04 |
 | UT-07 | 四捨五入 | TV-05、TV-06 |
 | UT-08 | 取價順序 | `z` 有值;`z` 為 `-` 且買賣價有值;只剩 `y`;全部沒有時不覆蓋舊值 |
-| UT-09 | 市場與報價狀態 | §7.5 的四個時間邊界;週六日;`MarketHolidays` 內的日期;`delayed` 在 `StaleSeconds` 的邊界(剛好 180 秒不算延遲、180.001 秒算延遲) |
+| UT-09 | 市場與報價狀態 | §7.5 的四個時間邊界;週六日;`MarketHolidays` 內的日期;`delayed` 在 `StaleSeconds` 的邊界(剛好 180 秒不算延遲、180.001 秒算延遲);v1.5:`market.stale` 門檻,有連線 180 秒、無連線 `UnwatchedIntervalSeconds + StaleSeconds` = 210 秒(剛好 210 秒不算、210.001 秒算) |
 | UT-10 | 驗證規則 | §10.1 各欄位的上下界與錯誤訊息 |
+| UT-12 | 走勢記錄條件(v1.5) | 08:59:59 不記、09:00:00 記、13:30:59 記、13:31:00 不記;`PriceSource` 2、3 不記;`Holiday`、`Closed` 不記;`QuoteTime` 日期不是今日或為 null 不記(UT-11 已由 FR-25 使用) |
+| UT-13 | 走勢降採樣 | n = 0、1、89、90(全留)、91(step 2)、271(step 4、≤ 90、含最後一點);缺口旗標:剛好 180 秒不算、超過算;被略過區間含缺口時下一保留點為 true |
+| UT-14 | 走勢軸與趨勢 | 含與不含 `prevClose`;全部同價(±1%);邊距 5%;`trend` 的 up、down、flat;無 `prevClose` 改比第一點;`high/low` 取降採樣前 |
+| UT-15 | 走勢顯示日 | 平日 `Open`、`Closed` → 今日;`Holiday` → 最近一筆(≤ 7 天);超過保留期或無資料 → `noData`;`prevClose` 僅在 `Quotes.TradeDate` 等於顯示日時有值 |
 
 ### 15.2 解析測試(`StockInventory.Quotes.Tests`,不連網路)
 
@@ -936,6 +1010,14 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | 格式異常 | 非 JSON、HTML 錯誤頁 | 視為失敗,保留舊價,記錄失敗 |
 | 逾時 | 超過 `Quote:TimeoutSeconds` | 視為失敗,進入退避 |
 
+**走勢紀錄與排程測試(v1.5,同專案,不連網路)**
+
+| 編號 | 案例 |
+| --- | --- |
+| QT-01 | 紀錄器緩衝:同分鐘多筆取最後一筆;跨分鐘移入待寫佇列;收盤與關機 flush 當前分鐘 |
+| QT-02 | flush 失敗:佇列保留、下次重試補寫;超過上限丟最舊;失敗不影響 `Quotes` upsert、快取與推播 |
+| QT-03 | 排程:`Open` 且無連線時距上次抓取 29 秒不抓、30 秒抓,且仍會呼叫紀錄器;有連線 5 秒抓;`state != Open` 仍只補抓缺價標的並維持 300 秒節流(原有案例不得改壞);退避期間不抓 |
+
 ### 15.3 整合測試(`StockInventory.Web.Tests`,使用獨立的測試資料庫,每次重建)
 
 | 編號 | 案例 |
@@ -948,6 +1030,13 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | IT-06 | 登入:失敗 5 次鎖定;未設定 TOTP 不能進主畫面與 API;停用的帳號不能登入 |
 | IT-07 | API-06 的組合:全部、單一、多選、`merge` 開關;`portfolioIds` 含無效 Id 時忽略,全部無效視為全部 |
 | IT-08 | CSV 匯出:含 BOM、欄位順序正確、`merge` 兩種模式、公式注入防護 |
+| IT-13 | API-15 資料隔離:請求他人持股代號、非持股代號、或混入一個非持股代號,一律整批 404;只含自己持股代號回 200 |
+| IT-14 | API-15 參數:`symbols` 為空、51 個、含非法字元回 400;只給 `sinceUtc` 或只給 `tradeDate` 回 400;去重與大小寫正規化 |
+| IT-15 | API-15 增量:`tradeDate` 相符加 `sinceUtc` 只回之後的點(`incremental = true`),`yMin/yMax` 為整日值;`tradeDate` 不符回完整資料;休市日顯示最近交易日且 `isToday = false` |
+| IT-16 | 走勢清理:超過保留天數的列被刪、保留期內的列留下 |
+| IT-17 | `Intraday:Enabled = false` 回 503 `FEATURE_DISABLED` 而 `/api/holdings` 仍 200;資料來源例外回 500 problem+json 而 `/api/holdings` 仍 200;429 附 `Retry-After` |
+
+注意:Web 測試使用 InMemory,不驗證實際 SQL Server 的 upsert、`datetime2(0)`、CHECK 與 FK,這些列入 §16.3 手動驗收。
 
 ---
 
@@ -964,6 +1053,7 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 | Q-05 | 現價與漲跌的顯示位數 | 目前為交易所原值、最多 2 位小數(§6.3);若使用者要求整數,只改 §6.3 |
 | Q-06 | 最低手續費與證交稅特例 | 由使用者確認後調整 `Fees:*` |
 | Q-07 | 視覺 API 模型選型與辨識準確度(FR-25) | T2b 以使用者提供、已去識別化的 10 至 20 張券商截圖實測,結果寫入 `docs/verify-notes.md`;門檻:代號 ≥ 98%、股數與總成本逐欄 ≥ 95% |
+| Q-08 | MIS 是否有歷史分時 API(FR-26,v1.5) | 使用者盤中以瀏覽器 DevTools 觀察 MIS 個股走勢頁的 XHR,結果寫入 `docs/verify-notes.md`;**不阻擋**,v1.5 不依賴其結果,即使存在也不納入本版 |
 
 ### 16.2 已知限制(不是缺陷,不要「修正」)
 
@@ -974,6 +1064,8 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - 手續費最低值是假設,債券型 ETF 等特殊標的的證交稅可能不同;扣費預估僅供參考。
 - 持股為快照模式,成本與股數須人工維護;沒有已實現損益、配息、歷史績效。
 - 截圖辨識可能出錯,代號、股數、總成本與單位(股或張)須由使用者核對;辨識的圖片會傳送至第三方服務(Anthropic API),不在本站保存。
+- 走勢圖(FR-26)為 1 分鐘解析度的觀測價,不是逐筆成交;沒有成交的分鐘延續前一筆成交價;高低點以已記錄的分鐘價為準,可能與券商 K 線不同。網站重啟或回收、抓價失敗、資料庫寫入失敗會留下缺口(以斷線呈現,不補值、不連線);盤前、試撮、收盤後不畫;只保留 7 天;不補歷史資料。
+- 盤中沒人看也每 30 秒抓價(v1.5),MIS 請求量約為 v1.4 的 10 倍(§7.3);MIS 無服務保證,仍可能被限流,屆時調大 `Quote:UnwatchedIntervalSeconds`。
 - 除權息當天,MIS 的昨收 `y` 是除權息調整後的參考價(實測),所以漲跌、今日損益都以參考價為基準,與交易所顯示一致;配息造成的價格下跌不會算成今日虧損,配息後的成本需使用者自行調整。
 
 ### 16.3 手動驗收清單
@@ -986,6 +1078,12 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - [ ] 重新發佈後,已登入的 Cookie 與記住裝置仍有效
 - [ ] 備份還原演練成功,還原後數字與還原前一致
 - [ ] 挑一檔實際持股,和券商 App 的現價、損益互相比對
+- [ ] FR-26:正式環境 Migration `AddQuoteIntraday` 已由有權限帳號人工執行,網站 SQL 登入可讀寫 `dbo.QuoteIntraday`
+- [ ] FR-26:盤中不開任何頁面 10 分鐘以上,再開啟主畫面,走勢線連續到現在、沒有直線連接的缺口;日誌顯示沒人看時約每 30 秒抓價
+- [ ] FR-26:收盤後仍顯示當日整天走勢;休市日顯示最近交易日並標日期;盤前或無成交的標的顯示「尚無成交」
+- [ ] FR-26:手機(iOS Safari、Android Chrome)迷你圖與大圖正常、深色模式顏色正確、瀏覽器主控台沒有 CSP 違規
+- [ ] FR-26:暫時讓資料庫無法寫入或停用 `Intraday:Enabled`,報價、損益、合計仍正常,只有圖區顯示失敗或隱藏
+- [ ] FR-26:盤中連續觀察 MIS 請求是否被限流(失敗率、退避次數);`/health` 與黃色延遲提示沒有在沒人看時誤報
 
 ---
 
@@ -999,3 +1097,16 @@ Hub:`/hubs/view`,需登入(Cookie),啟用 WebSocket。
 - 同庫存已存在的標的預設略過,可逐列選「更新為辨識值」;不提供全部覆蓋或加總合併。
 - 圖片不保存、不落地磁碟、重新編碼去除 EXIF 後才送出;每次上傳前須勾選同意;日誌不記錄圖片、辨識結果、代號、股數、成本。
 - 資料庫:無異動。
+
+---
+
+## 18. 當日即時線圖(FR-26,v1.5)
+
+完整的功能說明、流程圖、API-15 請求與回應(含欄位型別)、記錄與降採樣規則、前端規格、測試案例、部署與 Migration 說明,見 **`docs/sa/FR-26-當日即時線圖.md`**(SA 規格交付文件,2026-10-08 使用者確認)。該文件視為本規格的附錄;兩者衝突時依 §0 第 10 點停止該項實作並回報。
+
+摘要:
+- 盤中(`Open`)不論有沒有人看都持續抓價:有人看 5 秒、沒人看 `Quote:UnwatchedIntervalSeconds`(30 秒);非開盤時段行為不變(只補抓缺價標的、300 秒節流)。`market.stale` 無連線門檻為 `UnwatchedIntervalSeconds + StaleSeconds`。
+- 記錄:只記 `PriceSource = 1` 且 09:00 至 13:30 的觀測價;記憶體每代號只留當前分鐘最後一筆,每分鐘 flush 到 `QuoteIntraday`(保留 7 天);抓價中斷留下缺口,不補值。
+- 資料庫:新增 `QuoteIntraday`(§5.3);Migration 須人工執行,網站 SQL 登入無 DDL 權限(§13、SEC-16)。
+- API-15:批次讀取持股內代號的走勢,非持股代號 404;完整查詢降採樣至 ≤ 90 點,增量以 `tradeDate` 加 `sinceUtc`;伺服器提供軸範圍、趨勢、缺口旗標,前端只做座標映射。
+- 前端:自繪 SVG,每列迷你圖、點開大圖;失敗只影響圖區。
