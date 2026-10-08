@@ -78,7 +78,7 @@ public class MisParserTests // §15.2:不連網路
     }
 }
 
-public class MisParserRealSampleTests // 真實樣本:2026-10-06 盤中由使用者實測取得
+public class MisParserRealSampleTests // 真實樣本:2026-10-06 盤中、2026-10-08 開盤前由使用者實測取得
 {
     static string Sample(string name) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Samples", name));
 
@@ -89,6 +89,14 @@ public class MisParserRealSampleTests // 真實樣本:2026-10-06 盤中由使用
         Assert.Equal("0050", q.Symbol);
         Assert.Equal((116.0000m, StockInventory.Core.PriceSource.Trade, 115.95m), (q.LastPrice, q.Source, q.PrevClose));
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1791250014000).UtcDateTime, q.QuoteTimeUtc);
+    }
+
+    [Fact] // 開盤前(08:54):z 為 "-"、沒有 trade,只有五檔報價 → 以第一檔買賣中間價作為參考價
+    public void Real_PreOpen_NoTrade_UsesMidQuote()
+    {
+        var q = MisParser.Parse(Sample("real_tse_etf_pre_open.json")).Single();
+        Assert.Equal("0050", q.Symbol);
+        Assert.Equal((115.975m, StockInventory.Core.PriceSource.MidQuote, 116.05m), (q.LastPrice, q.Source, q.PrevClose));
     }
 
     [Fact] // 查無代號時,實測回應是帶一個 c 為空的元素(不是空陣列);必須略過
