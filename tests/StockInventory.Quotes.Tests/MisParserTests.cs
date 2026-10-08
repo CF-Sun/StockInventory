@@ -91,18 +91,26 @@ public class MisParserRealSampleTests // 真實樣本:2026-10-06 盤中、2026-1
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1791250014000).UtcDateTime, q.QuoteTimeUtc);
     }
 
-    [Fact] // 開盤前(08:54):z 為 "-"、沒有 trade,只有五檔報價 → 以第一檔買賣中間價作為參考價
-    public void Real_PreOpen_NoTrade_UsesMidQuote()
+    [Fact] // 開盤前(08:54):z 為 "-"、沒有 trade,有 pz → 以試撮價 pz 作為參考價
+    public void Real_PreOpen_NoTrade_UsesPz()
     {
         var q = MisParser.Parse(Sample("real_tse_etf_pre_open.json")).Single();
         Assert.Equal("0050", q.Symbol);
-        Assert.Equal((115.975m, StockInventory.Core.PriceSource.MidQuote, 116.05m), (q.LastPrice, q.Source, q.PrevClose));
+        Assert.Equal((116.0000m, StockInventory.Core.PriceSource.MidQuote, 116.05m), (q.LastPrice, q.Source, q.PrevClose));
     }
 
     [Fact] // 查無代號時,實測回應是帶一個 c 為空的元素(不是空陣列);必須略過
     public void Real_UnknownSymbol_ReturnsPlaceholderElement_Skipped()
     {
         Assert.Empty(MisParser.Parse(Sample("real_unknown_symbol.json")));
+    }
+
+    [Fact] // pz 無效("-")時才退到買賣價中間價
+    public void PzDash_FallsBackToMid()
+    {
+        var body = """{"msgArray":[{"c":"X","z":"-","pz":"-","a":"10.10_","b":"10.00_","y":"9.5"}]}""";
+        var q = MisParser.Parse(body).Single();
+        Assert.Equal((10.05m, StockInventory.Core.PriceSource.MidQuote), (q.LastPrice, q.Source));
     }
 
     [Fact] // z 與 trade.z 都沒有時才退到買賣價中間價

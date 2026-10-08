@@ -40,6 +40,7 @@ public static class MisParser
     {
         // z 在沒有當下成交時常為 "-"(實測:盤中 0050、2330 的 z 都是 "-"),此時改用回應中 trade 物件的最近成交價 trade.z(實測存在)
         var z = Num(Str(e, "z")) ?? (e.TryGetProperty("trade", out var tr) && tr.ValueKind == JsonValueKind.Object ? Num(Str(tr, "z")) : null);
+        var pz = Num(Str(e, "pz")); // 開盤前的試撮價(實測 08:54 有值,盤中無成交時為 "-")
         var ask = Num(FirstLevel(Str(e, "a")));
         var bid = Num(FirstLevel(Str(e, "b")));
         var y = Num(Str(e, "y"));
@@ -49,6 +50,7 @@ public static class MisParser
 
         decimal? last; PriceSource? source;
         if (z is not null) { last = z; source = PriceSource.Trade; }
+        else if (pz is not null) { last = pz; source = PriceSource.MidQuote; } // 參考價(非成交價)
         else if (ask is not null && bid is not null) { last = (ask.Value + bid.Value) / 2m; source = PriceSource.MidQuote; }
         else if (y is not null) { last = y; source = PriceSource.PrevClose; }
         else { last = null; source = null; }
