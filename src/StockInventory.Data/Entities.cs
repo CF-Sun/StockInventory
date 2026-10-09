@@ -82,6 +82,17 @@ public class QuoteRow
     public DateTime FetchedAtUtc { get; set; }
 }
 
+/// <summary>FR-26 當日分時走勢(1 分鐘解析度);只存公開報價,不含使用者資料(SPEC §5.3)。</summary>
+public class QuoteIntradayRow
+{
+    public string Symbol { get; set; } = "";
+    /// <summary>觀測時間(FetchedAtUtc)截到分鐘,UTC,秒為 0。</summary>
+    public DateTime BucketUtc { get; set; }
+    /// <summary>BucketUtc 換算 Taipei 時間的日期。</summary>
+    public DateOnly TradeDate { get; set; }
+    public decimal Price { get; set; }
+}
+
 public class MarketHoliday
 {
     public DateOnly HolidayDate { get; set; }

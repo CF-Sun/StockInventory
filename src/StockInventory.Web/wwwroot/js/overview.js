@@ -71,6 +71,7 @@
     try {
       view = await json('/api/holdings' + (query() ? '?' + query() : ''));
       errorEl.hidden = true;
+      Intraday.update(view); // 走勢圖:同步清單代號並延伸線尾(FR-26)
       render();
     } catch (e) {
       errorEl.hidden = false; // 保留舊資料
@@ -208,8 +209,10 @@
 
   function table(rows, hasFee) {
     var t = el('table', null, 'tbl');
+    var hasChart = Intraday.enabled();
     var heads = [['標的', 'symbol'], ['現價'], ['漲跌'], ['漲跌幅'], ['均價'], ['股數'], ['總成本'], ['市值', 'marketValue'],
       ['未實現損益', 'unrealizedPnl'], ['報酬率', 'returnRatePct'], ['今日損益', 'todayPnl']];
+    if (hasChart) heads.splice(1, 0, ['走勢']); // FR-26:桌機表格新增「走勢」欄
     if (hasFee) heads.push(['預估手續費'], ['預估證交稅']);
     heads.push(['']);
     var tr = el('tr');
@@ -230,7 +233,9 @@
       var row = el('tr');
       var name = el('td', r.symbol + ' ' + r.name);
       var tag = statusTag(r); if (tag) name.append(tag);
-      row.append(name,
+      row.append(name);
+      if (hasChart) row.append(chartCell(r));
+      row.append(
         el('td', r.lastPrice == null ? '—' : dec(r.lastPrice)),
         cell(int2(r.change), r.change), cell(pct(r.changePct, true), r.changePct),
         el('td', dec(r.avgCost)), el('td', int(r.shares)), el('td', int(r.totalCost)),
@@ -250,9 +255,24 @@
         var sub = el('tr', null, 'sub'); var td = el('td'); td.colSpan = heads.length;
         td.append(sourcesList(r)); sub.append(td); body.append(sub);
       }
+      if (hasChart && Intraday.isOpen(r.symbol)) { // 大圖在該列下方展開,與「▸ 庫存明細」互不干擾
+        var cr = el('tr', null, 'sub chart-row'); var ctd = el('td'); ctd.colSpan = heads.length;
+        ctd.append(Intraday.big(r.symbol, 'table')); cr.append(ctd); body.append(cr);
+      }
     });
     t.append(body);
     return t;
+  }
+
+  // 「走勢」欄:迷你圖(點擊展開大圖)加文字按鈕
+  function chartCell(r) {
+    var td = el('td', null, 'spark-cell');
+    td.append(Intraday.mini(r.symbol, 'table'));
+    var open = Intraday.isOpen(r.symbol);
+    var b = el('button', open ? '收合走勢圖' : '展開走勢圖', 'linkbtn small'); b.type = 'button';
+    b.addEventListener('click', function () { Intraday.toggle(r.symbol); });
+    td.append(b);
+    return td;
   }
   function int2(n) { return n == null ? '—' : dec(n, true); }
   function cell(text, n) { var td = el('td'); td.append(span(text, n)); return td; }
@@ -265,7 +285,9 @@
       var title = el('strong', r.symbol + ' ' + r.name);
       var tag = statusTag(r); if (tag) title.append(tag);
       var price = el('div'); price.append(document.createTextNode(r.lastPrice == null ? '—' : dec(r.lastPrice) + ' '), span(pct(r.changePct, true), r.changePct));
-      top.append(title, price);
+      top.append(title);
+      if (Intraday.enabled()) top.append(Intraday.mini(r.symbol, 'card')); // 手機卡片:代號列右側的迷你圖
+      top.append(price);
 
       var grid = el('div', null, 'grid');
       function g(label, node) { var d = el('div'); d.append(document.createTextNode(label + ' '), node); grid.append(d); }
@@ -282,6 +304,11 @@
         if (r.estFee != null) more.append(el('div', '預估手續費 ' + int(r.estFee) + ',預估證交稅 ' + int(r.estTax)));
         if (r.sources.length) more.append(sourcesList(r));
         c.append(more);
+      }
+      if (Intraday.enabled() && Intraday.isOpen(r.symbol)) {
+        var cw = el('div', null, 'chart-wrap');
+        cw.append(Intraday.big(r.symbol, 'card'));
+        c.append(cw);
       }
       c.addEventListener('click', function () { toggle(r.symbol); });
       wrap.append(c);
@@ -314,7 +341,7 @@
       .withUrl('/hubs/view')
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build();
-    conn.on('ViewUpdated', function (v) { view = v; errorEl.hidden = true; render(); }); // 整份取代
+    conn.on('ViewUpdated', function (v) { view = v; errorEl.hidden = true; Intraday.update(view); render(); }); // 整份取代;走勢線尾隨之延伸
     conn.on('MarketStatus', function (m) { if (view) { view.market = m; renderBanner(); } });
     conn.onreconnecting(startPolling);
     conn.onreconnected(function () { attach().catch(startPolling); });
@@ -323,6 +350,7 @@
   }
 
   document.addEventListener('visibilitychange', function () {
+    if (document.hidden) Intraday.pause(); else Intraday.resume(); // 走勢輪詢:hidden 時停止,visible 時立即補一次
     if (!connected()) { if (!document.hidden) loadView(); return; }
     conn.invoke(document.hidden ? 'Pause' : 'Resume').catch(function () {}); // 回到前景時 Resume 會立即補一次
   });
@@ -337,6 +365,7 @@
 
   async function init() {
     document.getElementById('retry').addEventListener('click', loadView);
+    Intraday.init({ rerender: function () { if (view) renderList(); }, refreshList: loadView });
     try {
       var all = await Promise.all([json('/api/portfolios'), json('/api/settings')]);
       portfolios = all[0]; settings = all[1];

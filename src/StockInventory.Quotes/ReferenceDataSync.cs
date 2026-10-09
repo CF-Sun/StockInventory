@@ -14,7 +14,7 @@ namespace StockInventory.Quotes;
 /// 同步失敗只記日誌,不影響網站運作;下個週期重試。
 /// </summary>
 public sealed class ReferenceDataSync(IServiceScopeFactory scopes, IReferenceDataSource source, IOptions<MarketOptions> market,
-    TimeProvider clock, ILogger<ReferenceDataSync> log) : BackgroundService
+    TimeProvider clock, ILogger<ReferenceDataSync> log, IntradayRetention? retention = null) : BackgroundService
 {
     private readonly TimeZoneInfo _zone = TaipeiTime.Zone(market.Value.TimeZoneId);
 
@@ -23,14 +23,23 @@ public sealed class ReferenceDataSync(IServiceScopeFactory scopes, IReferenceDat
         try
         {
             await Safe(() => EnsureStartupDataAsync(ct));
+            await PurgeIntradayAsync(ct); // 啟動時補清:網站可能在 07:00 當下沒有執行
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(UntilNextRun(), clock, ct);
                 await Safe(() => SyncInstrumentsAsync(ct));
                 await Safe(() => SyncHolidaysAsync(Today().Year, ct));
+                await PurgeIntradayAsync(ct); // §7.7 走勢清理:在標的主檔同步之後
             }
         }
         catch (OperationCanceledException) { /* 關閉 */ }
+    }
+
+    /// <summary>走勢清理(§5.4):失敗只記日誌(清理器內部處理),不影響其他定期工作。</summary>
+    private async Task PurgeIntradayAsync(CancellationToken ct)
+    {
+        if (retention is null) return;
+        await retention.PurgeAsync(ct);
     }
 
     private async Task Safe(Func<Task> f)

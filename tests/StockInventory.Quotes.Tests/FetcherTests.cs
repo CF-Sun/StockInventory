@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -45,13 +46,15 @@ public class FetcherTests
         public ServiceProvider Sp;
         public QuoteFetcher Fetcher;
 
-        public Env(int batchSize = 30)
+        public Env(int batchSize = 30, IIntradayRecorder? recorder = null, QuoteOptions? quote = null, ILogger<QuoteFetcher>? log = null)
         {
             var db = Guid.NewGuid().ToString();
             Sp = new ServiceCollection().AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(db)).BuildServiceProvider();
+            quote ??= new QuoteOptions();
+            quote.BatchSize = batchSize;
             Fetcher = new QuoteFetcher(Sp.GetRequiredService<IServiceScopeFactory>(), Client, Cache, Connections, [Sub],
-                Options.Create(new QuoteOptions { BatchSize = batchSize }), Options.Create(new MarketOptions()), Clock,
-                NullLogger<QuoteFetcher>.Instance, delay: (t, ct) => { Clock.Advance(t); return Task.CompletedTask; });
+                Options.Create(quote), Options.Create(new MarketOptions()), Clock,
+                log ?? NullLogger<QuoteFetcher>.Instance, delay: (t, ct) => { Clock.Advance(t); return Task.CompletedTask; }, recorder: recorder);
         }
 
         public async Task Seed(params (string Sym, Market M)[] items)
@@ -176,8 +179,8 @@ public class FetcherTests
         Assert.Equal(600m, (await e.Rows()).Single().LastPrice);
     }
 
-    [Fact]
-    public async Task NoConnections_WaitsIdleInterval_ButPriorityRequestBypasses()
+    [Fact] // QT-03(Q3):盤中沒人看也持續抓價,間隔 UnwatchedIntervalSeconds(30 秒);新增持股的優先請求不受限
+    public async Task Open_NoConnections_FetchesEveryUnwatchedInterval_ButPriorityRequestBypasses()
     {
         var e = new Env { };
         e.Connections.N = 0;
@@ -186,18 +189,187 @@ public class FetcherTests
 
         await e.Fetcher.TickAsync(default);                 // 第一次:從未抓過 → 抓
         Assert.Single(e.Client.Calls);
-        e.Clock.Advance(TimeSpan.FromSeconds(60));
-        await e.Fetcher.TickAsync(default);                 // 無連線且 < 300 秒 → 不抓
+        e.Clock.Advance(TimeSpan.FromSeconds(29));
+        await e.Fetcher.TickAsync(default);                 // 距上次 29 秒 → 不抓
         Assert.Single(e.Client.Calls);
 
-        e.Fetcher.RequestImmediateFetch("0050");            // 新增持股後優先抓
+        e.Fetcher.RequestImmediateFetch("0050");            // 新增持股後優先抓(不等 30 秒)
         await e.Fetcher.TickAsync(default);
         Assert.Equal(2, e.Client.Calls.Count);
         Assert.StartsWith("tse_0050.tw", e.Client.Calls[1]); // 優先代號排最前
 
-        e.Clock.Advance(TimeSpan.FromSeconds(301));
-        await e.Fetcher.TickAsync(default);                 // 過了 300 秒 → 再抓
+        e.Clock.Advance(TimeSpan.FromSeconds(29));
+        await e.Fetcher.TickAsync(default);                 // 距上次 29 秒 → 不抓
+        Assert.Equal(2, e.Client.Calls.Count);
+        e.Clock.Advance(TimeSpan.FromSeconds(1));
+        await e.Fetcher.TickAsync(default);                 // 剛好 30 秒 → 抓
         Assert.Equal(3, e.Client.Calls.Count);
+    }
+
+    [Fact] // QT-03:29 秒不抓、30 秒抓(無連線);有連線 5 秒抓
+    public async Task Open_IntervalBoundaries_NoConnections29Vs30_WithConnections5()
+    {
+        var e = new Env();
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        await e.Fetcher.TickAsync(default);
+        Assert.Single(e.Client.Calls);
+        e.Clock.Advance(TimeSpan.FromSeconds(29));
+        await e.Fetcher.TickAsync(default);
+        Assert.Single(e.Client.Calls);
+        e.Clock.Advance(TimeSpan.FromSeconds(1));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(2, e.Client.Calls.Count);
+
+        e.Connections.N = 1;                                // 有人看:5 秒間隔
+        e.Clock.Advance(TimeSpan.FromSeconds(4));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(2, e.Client.Calls.Count);
+        e.Clock.Advance(TimeSpan.FromSeconds(1));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(3, e.Client.Calls.Count);
+        e.Clock.Advance(TimeSpan.FromSeconds(5));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(4, e.Client.Calls.Count);
+    }
+
+    sealed class SpyRecorder : IIntradayRecorder
+    {
+        public List<(string Symbol, decimal Price, PriceSource Source, MarketState State, DateTime? QuoteTime, DateTime Fetched)> Calls = [];
+        public bool Throw;
+        public void Record(string symbol, decimal price, PriceSource source, MarketState state, DateTime? quoteTimeUtc, DateTime fetchedAtUtc)
+        {
+            Calls.Add((symbol, price, source, state, quoteTimeUtc, fetchedAtUtc));
+            if (Throw) throw new InvalidOperationException("recorder boom");
+        }
+    }
+
+    [Fact] // QT-03:盤中沒人看仍會呼叫紀錄器(帶觀測時間、報價時間、市場狀態)
+    public async Task Open_NoConnections_StillCallsRecorder()
+    {
+        var rec = new SpyRecorder();
+        var e = new Env(recorder: rec);
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "600.5", "610"));
+        await e.Fetcher.TickAsync(default);
+        var c = Assert.Single(rec.Calls);
+        Assert.Equal(("2330", 600.5m, PriceSource.Trade, MarketState.Open), (c.Symbol, c.Price, c.Source, c.State));
+        Assert.Equal(OpenTime.UtcDateTime, c.Fetched);                 // 觀測時間 = 本系統收到回應的時間
+        Assert.Equal(OpenTime.UtcDateTime, c.QuoteTime);               // tlong
+    }
+
+    [Fact] // 紀錄器只收到本輪請求的持股代號;回應夾帶的其他代號不記
+    public async Task Recorder_OnlyReceivesRequestedHoldingSymbols()
+    {
+        var rec = new SpyRecorder();
+        var e = new Env(recorder: rec);
+        await e.Seed(("2330", Market.Twse));
+        using (var s = e.Sp.CreateScope())
+        {
+            var d = s.ServiceProvider.GetRequiredService<AppDbContext>();
+            d.Instruments.Add(new Instrument { Symbol = "0050", Name = "0050", Market = Market.Twse, Kind = InstrumentKind.Etf, UpdatedAtUtc = DateTime.UtcNow });
+            await d.SaveChangesAsync();                                 // 0050 在主檔但沒人持有
+        }
+        e.Client.Respond = _ => Body(("2330", "600", "610"), ("0050", "150", "149"));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(["2330"], rec.Calls.Select(c => c.Symbol).ToArray());
+    }
+
+    [Fact] // Q14:紀錄器丟出例外不影響 Quotes upsert、快取與推播
+    public async Task RecorderFailure_DoesNotAffectQuotesCacheOrNotification()
+    {
+        var rec = new SpyRecorder { Throw = true };
+        var e = new Env(recorder: rec);
+        await e.Seed(("2330", Market.Twse), ("6488", Market.Tpex));
+        e.Client.Respond = _ => Body(("2330", "600", "610"), ("6488", "350", "349"));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(2, rec.Calls.Count);                               // 兩檔都嘗試記錄
+        Assert.Equal(2, (await e.Rows()).Count);
+        Assert.Equal(600m, e.Cache.Snapshot()["2330"].LastPrice);
+        Assert.Equal(1, e.Sub.Applied);
+        Assert.False(e.Fetcher.Get().Stale);
+    }
+
+    [Fact] // QT-03:非開盤只補抓缺價標的,且不會把非開盤報價交給紀錄器記錄(狀態為 Closed)
+    public async Task Closed_MissingFetch_PassesClosedStateToRecorder_AndKeepsThrottle()
+    {
+        var rec = new SpyRecorder();
+        var e = new Env(recorder: rec);
+        e.Clock.SetUtcNow(new DateTimeOffset(2026, 10, 5, 7, 0, 0, TimeSpan.Zero)); // 15:00 Taipei
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "600", "610"));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(MarketState.Closed, Assert.Single(rec.Calls).State);
+        e.Cache.Set("2330", new QuoteInput(600m, 610m, PriceSource.Trade, DateTime.UtcNow));
+        e.Clock.Advance(TimeSpan.FromSeconds(60));
+        await e.Fetcher.TickAsync(default);
+        Assert.Single(e.Client.Calls);                                  // 已有價格:不再抓
+    }
+
+    [Theory] // Quote:UnwatchedIntervalSeconds 超出範圍(< Active 或 > 300):回報設定錯誤並使用預設 30 秒
+    [InlineData(4)]
+    [InlineData(301)]
+    [InlineData(0)]
+    public async Task UnwatchedInterval_OutOfRange_FallsBackToDefault30(int configured)
+    {
+        var e = new Env(quote: new QuoteOptions { UnwatchedIntervalSeconds = configured });
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        await e.Fetcher.TickAsync(default);
+        e.Clock.Advance(TimeSpan.FromSeconds(29));
+        await e.Fetcher.TickAsync(default);
+        Assert.Single(e.Client.Calls);
+        e.Clock.Advance(TimeSpan.FromSeconds(1));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(2, e.Client.Calls.Count);
+    }
+
+    [Theory] // 範圍內(含邊界 5 與 300)的設定被採用
+    [InlineData(5, 5)]
+    [InlineData(120, 120)]
+    [InlineData(300, 300)]
+    public async Task UnwatchedInterval_InRange_IsUsed(int configured, int expectedSeconds)
+    {
+        var e = new Env(quote: new QuoteOptions { UnwatchedIntervalSeconds = configured });
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        await e.Fetcher.TickAsync(default);
+        e.Clock.Advance(TimeSpan.FromSeconds(expectedSeconds - 1));
+        await e.Fetcher.TickAsync(default);
+        Assert.Single(e.Client.Calls);
+        e.Clock.Advance(TimeSpan.FromSeconds(1));
+        await e.Fetcher.TickAsync(default);
+        Assert.Equal(2, e.Client.Calls.Count);
+    }
+
+    [Fact] // QT-03:失敗退避期間不抓(沒人看的 30 秒間隔已到,但連續失敗 5 次後的 60 秒退避仍生效)
+    public async Task Open_NoConnections_BackoffStillApplies()
+    {
+        var e = new Env();
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Fail = true;
+        async Task Tick(double advance) { e.Clock.Advance(TimeSpan.FromSeconds(advance)); await e.Fetcher.TickAsync(default); }
+
+        await Tick(0);   // t=0   失敗 1
+        await Tick(30);  // t=30  失敗 2
+        await Tick(30);  // t=60  失敗 3 → 退避 15 秒(到 t=75)
+        await Tick(30);  // t=90  失敗 4 → 退避 30 秒(到 t=120)
+        await Tick(30);  // t=120 失敗 5 → 退避 60 秒(到 t=180)
+        Assert.Equal(5, e.Client.Calls.Count);
+        await Tick(30);  // t=150 間隔(30 秒)已到,但仍在退避期 → 不抓
+        Assert.Equal(5, e.Client.Calls.Count);
+        e.Client.Fail = false; e.Client.Respond = _ => Body(("2330", "1", "1"));
+        await Tick(30);  // t=180 退避結束 → 抓,成功
+        Assert.Equal(6, e.Client.Calls.Count);
+        await Tick(29);  // 成功後恢復正常的 30 秒間隔
+        Assert.Equal(6, e.Client.Calls.Count);
+        await Tick(1);
+        Assert.Equal(7, e.Client.Calls.Count);
     }
 
     [Fact]
@@ -258,8 +430,32 @@ public class FetcherTests
         Assert.Contains(e.Sub.Ticks, t => t.S.Stale && t.Changed); // 旗標改變有通知
     }
 
-    [Fact] // 方案 a:無連線時門檻為 Idle(300) + Stale(180) = 480 秒
-    public async Task Stale_WhenNoConnections_UsesIdlePlusStaleThreshold()
+    sealed class ListLogger : ILogger<QuoteFetcher>
+    {
+        public List<(LogLevel Level, string Message)> Entries = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact] // 驗收用:盤中每 10 分鐘記一則抓價統計,可看出沒人看時約每 30 秒一輪(10 分鐘約 20 輪)
+    public async Task Open_NoConnections_LogsRoundStatsEvery10Minutes()
+    {
+        var log = new ListLogger();
+        var e = new Env(log: log);
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        for (var i = 0; i < 12 * 21; i++) { await e.Fetcher.TickAsync(default); e.Clock.Advance(TimeSpan.FromSeconds(5)); } // 21 分鐘
+        var stats = log.Entries.Where(x => x.Message.StartsWith("盤中抓價統計")).ToList();
+        Assert.Equal(2, stats.Count);
+        Assert.Matches(@"共 2[01] 輪\(有人看 0、沒人看 2[01]\)", stats[0].Message);   // 10 分鐘 / 30 秒 = 20 輪(含頭尾視窗邊界為 21)
+        Assert.DoesNotContain("2330", stats[0].Message);
+    }
+
+    [Fact] // v1.5(§7.4):無連線時門檻為 Unwatched(30) + Stale(180) = 210 秒;有連線 180 秒
+    public async Task Stale_WhenNoConnections_UsesUnwatchedPlusStaleThreshold()
     {
         var e = new Env();
         e.Connections.N = 0;
@@ -268,21 +464,36 @@ public class FetcherTests
         await e.Fetcher.TickAsync(default);                       // t0 成功
         e.Client.Fail = true;
 
-        e.Clock.Advance(TimeSpan.FromSeconds(200));
+        e.Clock.Advance(TimeSpan.FromSeconds(190));
         await e.Fetcher.TickAsync(default);
-        Assert.False(e.Fetcher.Get().Stale);                      // 正常閒置間隔內(舊規則 180 秒會誤判為 stale)
+        Assert.False(e.Fetcher.Get().Stale);                      // 距 t0 190 秒:無連線門檻 210 秒內(有連線的 180 秒規則會誤判)
 
-        e.Clock.Advance(TimeSpan.FromSeconds(280));               // 距 t0 = 480 秒
-        Assert.False(e.Fetcher.Get().Stale);                      // 剛好 480 秒不算
-        e.Clock.Advance(TimeSpan.FromSeconds(1));
-        Assert.True(e.Fetcher.Get().Stale);                       // 481 秒才算
+        e.Clock.Advance(TimeSpan.FromSeconds(20));                // 距 t0 = 210 秒
+        Assert.False(e.Fetcher.Get().Stale);                      // 剛好 210 秒不算
+        e.Clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(e.Fetcher.Get().Stale);                       // 210.001 秒才算
 
-        e.Connections.N = 1;                                      // 有人連線後回到 180 秒門檻
+        e.Connections.N = 1;                                      // 有人連線:門檻 180 秒,所以仍為 stale
         Assert.True(e.Fetcher.Get().Stale);
     }
 
-    [Fact] // 閒置期間正常抓取(每 300 秒一次)不應觸發任何 stale 通知
-    public async Task IdleNormalOperation_NeverFlagsStale()
+    [Fact] // 有連線的門檻仍是 180 秒;沒連線時 181 秒不算 stale
+    public async Task Stale_ThresholdFollowsConnectionCount_At181Seconds()
+    {
+        var e = new Env();
+        e.Connections.N = 0;
+        await e.Seed(("2330", Market.Twse));
+        e.Client.Respond = _ => Body(("2330", "1", "1"));
+        await e.Fetcher.TickAsync(default);
+        e.Client.Fail = true;
+        e.Clock.Advance(TimeSpan.FromSeconds(181));
+        Assert.False(e.Fetcher.Get().Stale);                      // 無連線:門檻 210
+        e.Connections.N = 1;
+        Assert.True(e.Fetcher.Get().Stale);                       // 有連線:門檻 180
+    }
+
+    [Fact] // 沒人看期間正常抓取(每 30 秒一次)不應觸發任何 stale 通知
+    public async Task UnwatchedNormalOperation_NeverFlagsStale()
     {
         var e = new Env();
         e.Connections.N = 0;
@@ -294,6 +505,7 @@ public class FetcherTests
             Assert.False(e.Fetcher.Get().Stale);
         }
         Assert.All(e.Sub.Ticks, t => Assert.False(t.S.Stale));
+        Assert.Equal(120, e.Client.Calls.Count);                   // 一小時 = 120 次(每 30 秒一次),不是 12 次
     }
 
     [Fact]

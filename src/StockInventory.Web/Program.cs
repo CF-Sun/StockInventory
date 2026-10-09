@@ -27,6 +27,7 @@ var cfg = builder.Configuration;
 builder.Services.Configure<LimitsOptions>(cfg.GetSection("Limits"));
 builder.Services.Configure<QuoteOptions>(cfg.GetSection("Quote"));
 builder.Services.Configure<MarketOptions>(cfg.GetSection("Market"));
+builder.Services.Configure<IntradayOptions>(cfg.GetSection("Intraday")); // FR-26:皆非機敏設定
 builder.Services.Configure<FeesOptions>(cfg.GetSection("Fees"));
 builder.Services.Configure<AuthOptions>(cfg.GetSection("Auth"));
 builder.Services.Configure<SmtpOptions>(cfg.GetSection("Smtp"));
@@ -60,6 +61,9 @@ if (cfg.GetValue("Quote:Enabled", true))
     builder.Services.AddSingleton<QuoteCacheStore>();
     builder.Services.AddSingleton<IQuoteCache>(sp => sp.GetRequiredService<QuoteCacheStore>());
     builder.Services.AddHttpClient<IMisClient, MisClient>(c => c.DefaultRequestHeaders.UserAgent.ParseAdd("StockInventory/1.0"));
+    builder.Services.AddSingleton<IntradayRecorder>(); // FR-26 走勢紀錄器(記憶體緩衝 + 每分鐘 flush)
+    builder.Services.AddSingleton<IIntradayRecorder>(sp => sp.GetRequiredService<IntradayRecorder>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<IntradayRecorder>());
     builder.Services.AddSingleton<QuoteFetcher>();
     builder.Services.AddSingleton<IMarketStatusSource>(sp => sp.GetRequiredService<QuoteFetcher>());
     builder.Services.AddSingleton<IFetchRequester>(sp => sp.GetRequiredService<QuoteFetcher>());
@@ -83,6 +87,10 @@ if (cfg.GetValue("Sync:Enabled", true))
     });
     builder.Services.AddHostedService<ReferenceDataSync>();
 }
+builder.Services.AddSingleton<IntradayConfig>();
+builder.Services.AddSingleton<IntradayRetention>();
+builder.Services.AddSingleton<StockInventory.Web.Services.IntradayRateLimiter>();
+builder.Services.AddScoped<StockInventory.Web.Services.IIntradayService, StockInventory.Web.Services.IntradayService>();
 builder.Services.AddScoped<StockInventory.Web.Services.ViewService>();
 builder.Services.AddScoped<StockInventory.Web.Services.HoldingService>();
 
@@ -135,6 +143,7 @@ app.MapAdminApi();
 app.MapPortfolioApi();
 app.MapHoldingImportApi();
 app.MapViewApi();
+app.MapIntradayApi();
 app.MapSettingsApi();
 app.MapExportApi();
 app.MapGet("/api/me", (ICurrentUser u) => Results.Json(new { userId = u.UserId })).RequireAuthorization();

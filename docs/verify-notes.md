@@ -79,6 +79,14 @@
 | Q-08 | MIS 是否有歷史分時 API(FR-26 當日即時線圖,SPEC v1.5) | **不阻擋主線**:v1.5 的走勢由本系統自行記錄(`QuoteIntraday`),不依賴此項結果;即使存在也不納入 v1.5(不補歷史、不取代自行記錄),僅作為日後補缺口或備援的參考。**請使用者在盤中(約 09:00 至 13:30)實測**:(1) 用瀏覽器開 MIS 個股走勢頁(基本市況報導網站內查詢個股,例如 0050 或 2330),開 DevTools 的 Network,篩選 XHR/Fetch,觀察除了 `getStockInfo.jsp` 之外,是否另有請求回傳「當日分時序列」(多筆時間與價格);(2) 若有,記錄完整 URL、查詢參數(代號、日期、區間)、回應 JSON 欄位名稱與一筆範例、時間粒度與筆數、是否可查已收盤的過去日期與可回溯幾天;(3) 同一請求是否需 cookie、`Referer` 或特殊標頭,連續重複請求是否被擋;(4) 若沒有此類請求(走勢圖只靠前端累積 `getStockInfo.jsp` 的結果),記「不存在」。結果貼回後由 SA 更新本表與 SPEC §16.1。樣本回應請去識別化後存到 `tests/StockInventory.Quotes.Tests/Samples/` |
 | — | FR-25 部署參數 | IIS `maxAllowedContentLength` 須 ≥ `Vision:MaxImageBytes` + 64 KB(預設 5,242,880 + 65,536 = 5,308,416 位元組以上;站台預設 30,000,000 已足夠,若曾調低請確認);出站 HTTPS 須可連 `Vision:Endpoint`;全站每日額度以台北時間日界計算(UTC+8),重啟歸零 |
 
+## FR-26 當日即時線圖(P4b)實作備註
+
+- 資料表 `QuoteIntraday` 與 Migration `AddQuoteIntraday` 已產生(只產生腳本,**須人工執行**,步驟見 `docs/deploy-iis.md`;腳本 `docs/sql/AddQuoteIntraday.sql`)。
+- Web 測試使用 InMemory,**不會**驗證 SQL Server 實際的 upsert(PK 衝突重試)、`datetime2(0)`、CHECK 與 FK 行為,也無法驗證「資料表不存在」時 API-15 回 500、紀錄器 flush 失敗只記警告;這些在 `docs/verify/fr26-acceptance.md` 列為手動驗收。
+- 前端為純 JavaScript 自繪 SVG(`wwwroot/js/intraday.js`),沒有自動化瀏覽器測試(SPEC §2.2 非目標);開發時以 headless Chromium 對靜態測試頁驗證過渲染與 CSP(沒有違規),Web 測試另有靜態檢查確認該檔案不含 inline style / HTML 字串注入 / 外部資源。
+- 紀錄器在啟動時只做「資料表可讀」檢查(SPEC 未定義「啟動重建」):重啟會丟失尚未 flush 的最多 1 分鐘資料(SPEC §5.3 已列為可接受)。
+- 注意:IIS 的 W3C 存取日誌會記錄 `/api/intraday?symbols=...` 的查詢字串(應用程式日誌不會,Serilog 已把 `Microsoft.AspNetCore` 壓到 Warning);若在意「哪些代號被請求」,請在 IIS 日誌設定排除或縮短保留。
+
 ## 樣本說明
 
 `tests/StockInventory.Quotes.Tests/Samples/` 內:
@@ -99,7 +107,8 @@
 > `market.stale = (state == Open) && (now - lastSuccessAtUtc) > 門檻`,
 > 其中門檻 = 有連線時為 `Quote:StaleSeconds`;無連線時為 `Quote:IdleIntervalSeconds + Quote:StaleSeconds`。
 
-**v1.5 更新(2026-10-08)**:使用者決定盤中不論有沒有人看都持續抓價(FR-26),沒人看的間隔由 300 秒改為 `Quote:UnwatchedIntervalSeconds`(30 秒)。無連線的 `stale` 門檻因此改為 `Quote:UnwatchedIntervalSeconds + Quote:StaleSeconds`(預設 210 秒),SPEC §7.4 已修改;`IdleIntervalSeconds` 只用於非開盤時段補抓的節流。上述 `QuoteFetcher.Snapshot` 實作與兩個測試(`Stale_WhenNoConnections_UsesIdlePlusStaleThreshold`、`IdleNormalOperation_NeverFlagsStale`)須在階段 P4b 的 T4b.3 依新定義修改,目前程式碼尚未改。
+**v1.5 更新(2026-10-08)**:使用者決定盤中不論有沒有人看都持續抓價(FR-26),沒人看的間隔由 300 秒改為 `Quote:UnwatchedIntervalSeconds`(30 秒)。無連線的 `stale` 門檻因此改為 `Quote:UnwatchedIntervalSeconds + Quote:StaleSeconds`(預設 210 秒),SPEC §7.4 已修改;`IdleIntervalSeconds` 只用於非開盤時段補抓的節流。
+**已實作(P4b T4b.3)**:`QuoteFetcher.Snapshot` 改用 Core 的 `StaleRule`;兩個舊測試已依新定義改寫為 `Stale_WhenNoConnections_UsesUnwatchedPlusStaleThreshold`(210 秒邊界)與 `UnwatchedNormalOperation_NeverFlagsStale`(一小時 120 次抓取);原 `NoConnections_WaitsIdleInterval_ButPriorityRequestBypasses`(300 秒)同樣改為 30 秒版本 `Open_NoConnections_FetchesEveryUnwatchedInterval_ButPriorityRequestBypasses`。
 
 注意:單檔報價的 `quoteStatus = delayed`(§7.4 的另一條規則,以 `FetchedAtUtc` 與 `StaleSeconds` 比較)沒有改動。
 閒置一段時間後有人開頁面,最初幾秒畫面可能顯示「延遲」,抓取(5 秒內)完成後會恢復。

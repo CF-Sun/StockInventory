@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Holding> Holdings => Set<Holding>();
     public DbSet<HoldingChange> HoldingChanges => Set<HoldingChange>();
     public DbSet<QuoteRow> Quotes => Set<QuoteRow>();
+    public DbSet<QuoteIntradayRow> QuoteIntraday => Set<QuoteIntradayRow>();
     public DbSet<MarketHoliday> MarketHolidays => Set<MarketHoliday>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -120,6 +121,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.FetchedAtUtc).HasColumnType("datetime2");
             e.HasOne<Instrument>().WithOne().HasForeignKey<QuoteRow>(x => x.Symbol)
                 .HasConstraintName("FK_Quotes_Instruments").OnDelete(DeleteBehavior.NoAction);
+        });
+
+        b.Entity<QuoteIntradayRow>(e =>
+        {
+            e.ToTable("QuoteIntraday", t => t.HasCheckConstraint("CK_QuoteIntraday_Price", "[Price] > 0"));
+            e.HasKey(x => new { x.Symbol, x.BucketUtc }).HasName("PK_QuoteIntraday");
+            e.Property(x => x.Symbol).HasMaxLength(10).IsUnicode(false);
+            e.Property(x => x.BucketUtc).HasColumnType("datetime2(0)");
+            e.Property(x => x.TradeDate).HasColumnType("date");
+            e.Property(x => x.Price).HasColumnType("decimal(12,4)");
+            e.HasIndex(x => x.TradeDate).HasDatabaseName("IX_QuoteIntraday_TradeDate");
+            e.HasOne<Instrument>().WithMany().HasForeignKey(x => x.Symbol)
+                .HasConstraintName("FK_QuoteIntraday_Instruments").OnDelete(DeleteBehavior.NoAction);
         });
 
         b.Entity<MarketHoliday>(e =>
